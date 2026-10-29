@@ -1,0 +1,30 @@
+name: Desktop releases
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['qzone-memory/**', 'scripts/build-release.py', '.github/workflows/build-desktop.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - run: python -m pip install -r qzone-memory/requirements-desktop.txt
+      - name: Offline regression tests
+        env:
+          PYTHONPATH: qzone-memory
+        run: python -m unittest discover -s qzone-memory/tests -q
+      - run: python scripts/build-release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: space-memory-windows-x64
+          path: release-artifacts/*
+          retention-days: 7
+          if-no-files-found: error

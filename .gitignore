@@ -1,0 +1,15 @@
+runtime/
+references/
+release-artifacts/
+website/
+qzone-memory/local-data/
+qzone-memory/dist-mac/
+qzone-memory/build*/
+qzone-memory/*.spec
+qzone-memory/qzone_memory/ui/local-config.json
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.venv/
+cloud-data/

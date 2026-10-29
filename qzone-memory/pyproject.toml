@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qzone-memory"
+version = "0.5.2"
+description = "Local QQ Zone archival core"
+requires-python = ">=3.11"
+dependencies = ["Pillow>=12,<13", "requests>=2.32,<3", "json5>=0.12,<1", "beautifulsoup4>=4.12,<5", "tzdata>=2025.2"]
+
+[project.scripts]
+qzone-memory = "qzone_memory.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["qzone_memory*"]
+
+[project.optional-dependencies]
+desktop = ["Flask>=3,<4", "pywebview>=6,<7"]
+build = ["pyinstaller>=6,<7"]
+
+[tool.setuptools.package-data]
+qzone_memory = ["ui/*.html", "ui/*.css", "ui/*.js", "cloud_ui/*.html", "cloud_ui/*.css", "cloud_ui/*.js"]
