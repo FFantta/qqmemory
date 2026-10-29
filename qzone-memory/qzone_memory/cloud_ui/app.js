@@ -19,6 +19,10 @@ function render(job){
   if(hasQR){$('qr').src=job.qr;$('save-qr').href=job.qr;}else{$('qr').removeAttribute('src');$('save-qr').removeAttribute('href');}
   $('results').hidden=!job.ready;
   $('stop').hidden=!job.active;
+  $('stop').textContent=job.phase==='login'?'取消本次扫码':'暂停并生成已有结果';
+  $('refresh-qr').hidden=!job.can_refresh;
+  $('refresh-qr').disabled=job.active&&!hasQR;
+  $('refresh-qr').textContent=job.active?'刷新二维码':'重新扫码';
   $('start').disabled=job.active||!$('consent').checked;
   const p=job.progress||{};
   $('progress').textContent=p.label||p.stage||'';
@@ -42,6 +46,11 @@ $('start').addEventListener('click',async()=>{
   $('start').disabled=true;$('error').textContent='';
   try{render(await api('/api/jobs','POST',{consent:$('consent').checked}));}
   catch(error){$('error').textContent=error.message;$('start').disabled=!$('consent').checked;}
+});
+$('refresh-qr').addEventListener('click',async()=>{
+  $('refresh-qr').disabled=true;
+  try{render(await api('/api/jobs/'+current.id+'/refresh','POST',{}));$('error').textContent='';}
+  catch(error){$('error').textContent=error.message;$('refresh-qr').disabled=false;}
 });
 $('stop').addEventListener('click',async()=>{try{await api('/api/jobs/'+current.id+'/stop','POST',{});$('message').textContent='正在停止并收尾，请稍候。';}catch(error){$('error').textContent=error.message;}});
 $('delete').addEventListener('click',async()=>{

@@ -56,6 +56,9 @@ class CloudJob:
         self.message = '正在申请 QQ 二维码'
         self.qr = None
         self.stop = threading.Event()
+        self.refresh_qr = threading.Event()
+        self.qr_refreshes = 0
+        self.login_finished = False
         self.progress = TaskProgress()
         self.lock = threading.RLock()
         self.output = None
@@ -69,6 +72,7 @@ class CloudJob:
     def persist(self):
         value = dict(schema=1, id=self.id, owner=self.owner, created=self.created, expires=self.expires,
                      phase=self.phase, message=self.message, stats=self.stats,
+                     qr_refreshes=self.qr_refreshes, login_finished=self.login_finished,
                      output=str(self.output.relative_to(self.root)) if self.output else None)
         path = self.root/'job.json'
         temporary = path.with_suffix('.tmp')
@@ -80,7 +84,9 @@ class CloudJob:
             return dict(id=self.id, phase=self.phase, message=self.message, qr=self.qr,
                         expires=self.expires, active=self.active, stats=self.stats,
                         progress=self.progress.snapshot(self.active, self.phase),
-                        ready=self.output is not None, incomplete=self.phase == 'partial')
+                        ready=self.output is not None, incomplete=self.phase == 'partial',
+                        can_refresh=not self.login_finished and self.phase in ('login','error','cancelled'),
+                        qr_refreshes=self.qr_refreshes)
 
     def notify(self, kind, value):
         with self.lock:
@@ -98,6 +104,11 @@ class CloudJob:
             qq = self.service.qq_factory()
             login_deadline = time.monotonic() + self.service.login_seconds
             while not self.stop.is_set() and not qq.uin:
+                if self.refresh_qr.is_set():
+                    self.refresh_qr.clear()
+                    qq.close()
+                    qq = self.service.qq_factory()
+                    login_deadline = time.monotonic() + self.service.login_seconds
                 if time.monotonic() >= login_deadline:
                     raise TimeoutError('login_timeout')
                 image = qq.qr()
@@ -105,6 +116,8 @@ class CloudJob:
                     self.qr = 'data:image/png;base64,'+base64.b64encode(image).decode('ascii')
                     self.message = '请用手机 QQ 扫码，并确认登录'
                 while not self.stop.wait(self.service.poll_seconds):
+                    if self.refresh_qr.is_set():
+                        break
                     if time.monotonic() >= login_deadline:
                         raise TimeoutError('login_timeout')
                     result = qq.poll()
@@ -116,6 +129,7 @@ class CloudJob:
                 self.phase, self.message = 'cancelled', '已取消扫码'
                 return
             with self.lock:
+                self.login_finished = True
                 self.phase, self.qr = 'collecting', None
                 self.message = '正在采集；体验版范围有限，不代表完整深度找回'
             timer = threading.Timer(self.service.limits.total_seconds, self.stop.set)
@@ -134,8 +148,20 @@ class CloudJob:
             with self.lock:
                 self.output = Path(output)
                 self.stats = {key:report.get(key,0) for key in ('exported_posts','exported_photos','requests')}
-                self.phase = 'done' if report.get('state') == 'completed' else 'partial'
-                self.message = '结果已生成，可预览或下载。体验版仅覆盖本轮取得的内容。'
+                self.stats['scan_state'] = report.get('state')
+                reasons = []
+                if report.get('state') == 'failed':
+                    reasons.append('采集遇到异常而中断，当前为已保存的部分结果')
+                elif report.get('state') != 'completed':
+                    reasons.append('本轮已暂停或达到扫描时间／请求预算')
+                if report.get('exported_photos',0) >= self.service.limits.media:
+                    reasons.append('达到本轮 '+str(self.service.limits.media)+' 张图片上限')
+                if report.get('issues') and not reasons:
+                    reasons.append('部分来源或图片未取得，详见下载包中的采集报告')
+                self.stats['completion_notes'] = reasons
+                self.stats['diagnostic'] = report.get('diagnostic')
+                self.phase = 'partial' if reasons else 'done'
+                self.message = '；'.join(reasons) if reasons else '结果已生成，可预览或下载。体验版仅覆盖本轮取得的内容。'
         except Exception as exc:
             # Never persist/return requests exception text, signed URLs, cookies or locals.
             self.failure = type(exc).__name__
@@ -227,6 +253,9 @@ class CloudService:
                 job.service, job.id, job.root = self, path.name, path
                 job.owner, job.created, job.expires = value['owner'], value['created'], value['expires']
                 job.lock, job.stop, job.progress = threading.RLock(), threading.Event(), TaskProgress()
+                job.refresh_qr = threading.Event()
+                job.qr_refreshes = value.get('qr_refreshes',0)
+                job.login_finished = value.get('login_finished',bool(value.get('output')))
                 job.qr, job.thread, job.failure = None, None, None
                 job.active, job.deleted, job.stats = False, False, value.get('stats',{})
                 candidate = (path/value['output']).resolve() if value.get('output') else None
@@ -250,6 +279,30 @@ class CloudService:
             self.jobs.pop(job.id, None)
             if not job.active:
                 shutil.rmtree(job.root, ignore_errors=True)
+
+    def refresh(self, job):
+        with self.lock, job.lock:
+            if job.deleted or job.expires <= time.time() or job.login_finished or job.output:
+                raise ValueError('任务已开始采集或已结束，不能刷新登录二维码')
+            if job.qr_refreshes >= 5 or time.time()-job.created >= 900:
+                raise ValueError('本轮扫码重试次数或时间已用完，请重新申请任务')
+            if not job.active:
+                if not self.slots.acquire(blocking=False):
+                    raise ValueError('云端正在处理其他任务，请稍后重试')
+                job.stop = threading.Event()
+                job.progress = TaskProgress()
+                job.active = True
+                job.phase = 'login'
+                job.failure = None
+                job.refresh_qr.clear()
+                job.thread = threading.Thread(target=job.run,daemon=True)
+                job.thread.start()
+            else:
+                job.refresh_qr.set()
+            job.qr_refreshes += 1
+            job.qr = None
+            job.message = '正在刷新二维码，请重新扫码并确认登录'
+            job.persist()
 
     def create(self, owner):
         self.cleanup()
@@ -366,6 +419,15 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
         job = owned(identifier)
         job.stop.set()
         return jsonify(ok=True)
+
+    @app.post('/api/jobs/<identifier>/refresh')
+    def refresh(identifier):
+        job = owned(identifier)
+        try:
+            service.refresh(job)
+        except ValueError as exc:
+            return jsonify(error=str(exc)),409
+        return jsonify(job.state())
 
     @app.delete('/api/jobs/<identifier>')
     def delete(identifier):

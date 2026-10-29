@@ -155,6 +155,54 @@ class CloudTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             standalone_html(source,root/'result.html')
 
+    def test_refresh_replaces_challenge_and_failed_login_can_retry(self):
+        class Waiting(FakeQQ):
+            def poll(self):
+                return '66'
+        def factory():
+            qq = Waiting()
+            self.qq.append(qq)
+            return qq
+        self.service.qq_factory = factory
+        response = self.client.post('/api/jobs',json={'consent':True},headers=self.headers)
+        job = self.service.jobs[response.json['id']]
+        deadline = time.monotonic()+2
+        while not job.qr and time.monotonic()<deadline:
+            time.sleep(.005)
+        first = self.qq[0]
+        other = self.app.test_client()
+        csrf = other.get('/api/session').json['csrf']
+        url = '/api/jobs/'+job.id+'/refresh'
+        self.assertEqual(other.post(url,json={},headers={'Origin':'http://localhost','X-CSRF-Token':csrf}).status_code,404)
+        self.assertEqual(self.client.post(url,json={}).status_code,403)
+        self.assertEqual(self.client.post(url,json={},headers=self.headers).status_code,200)
+        deadline = time.monotonic()+2
+        while len(self.qq)<2 and time.monotonic()<deadline:
+            time.sleep(.005)
+        self.assertEqual(len(self.qq),2)
+        self.assertTrue(first.closed)
+        job.stop.set();job.thread.join(3)
+        self.assertEqual(job.phase,'cancelled')
+        response = self.client.post(url,json={},headers=self.headers)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json['id'],job.id)
+        job.stop.set();job.thread.join(3)
+        job.qr_refreshes=5
+        self.assertEqual(self.client.post(url,json={},headers=self.headers).status_code,409)
+
+    def test_result_refresh_rejected_and_failure_not_presented_as_budget(self):
+        def runner(*args,**kwargs):
+            output, report = fake_runner(*args,**kwargs)
+            report.update(state='failed',diagnostic={'exception':'builtins.AttributeError','frames':[{'file':'trial.py','line':1,'function':'history'}]})
+            return output,report
+        self.service.runner=runner
+        job=self.create()
+        self.assertEqual(job.phase,'partial')
+        self.assertIn('异常',job.message)
+        self.assertEqual(job.stats['scan_state'],'failed')
+        self.assertFalse(job.state()['can_refresh'])
+        self.assertEqual(self.client.post('/api/jobs/'+job.id+'/refresh',json={},headers=self.headers).status_code,409)
+
     def test_secret_required_and_login_timeout(self):
         with self.assertRaises(ValueError):
             create_cloud_app(secret='short',testing=True,cleaner=False)

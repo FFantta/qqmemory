@@ -159,7 +159,10 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
         rawdir.mkdir(exist_ok=True)
         (rawdir / f'{job}-{requests_count}.json').write_text(json.dumps(cards, ensure_ascii=False), encoding='utf-8')
         save([parse_history(c, qq.uin)[0] for c in cards], {'phase': phase, 'params': params})
-        return cards, body.get('main', {}).get('hasMoreFeeds')
+        main = body.get('main')
+        if main is not None and not isinstance(main, dict):
+            raise ProtocolError('历史分页信息格式异常，未将其当作空页')
+        return cards, (main or {}).get('hasMoreFeeds')
     state = 'completed'
     try:
         guard()
@@ -273,6 +276,8 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
                    'exported_photos': json.loads((destination / 'manifest.json').read_text(encoding='utf-8'))['media'] - json.loads((destination / 'manifest.json').read_text(encoding='utf-8'))['missing_media'],
                    'media_concurrency': media_workers, 'media_saved_this_run': saved, 'media_failed_this_run': failed,
                    'note': '历史来源不等于已确认删除；可能是当前列表遗漏或接口范围差异。年份窗是有限探测，不是完整历史覆盖。'}
+        if state == 'failed':
+            summary['diagnostic'] = diagnostic
         if deep:
             from .deep_history import load_state
             progress = load_state(archive)
