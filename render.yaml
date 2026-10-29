@@ -2,15 +2,11 @@ services:
   - type: web
     name: space-memory-cloud
     runtime: python
-    plan: 0.5c-512mb
+    plan: free
     region: singapore
     buildCommand: pip install -r qzone-memory/requirements-cloud.txt
     startCommand: gunicorn --chdir qzone-memory --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT run_cloud:app
     healthCheckPath: /healthz
-    disk:
-      name: cloud-trial-quota
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.12
@@ -18,7 +14,5 @@ services:
         generateValue: true
       - key: SPACE_MEMORY_CLOUD_ROOT
         value: /tmp/space-memory-cloud
-      - key: SPACE_MEMORY_CLOUD_USAGE_PATH
-        value: /var/data/space-memory-cloud-usage.sqlite3
       - key: SPACE_MEMORY_CLOUD_PROXY
         value: '1'

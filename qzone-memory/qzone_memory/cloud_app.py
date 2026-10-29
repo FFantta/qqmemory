@@ -287,7 +287,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=1, x_host=0)
     app.config.update(SECRET_KEY=secret, MAX_CONTENT_LENGTH=4096, SESSION_COOKIE_NAME='space_memory_cloud',
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=not testing, SESSION_COOKIE_SAMESITE='Strict')
-    root = root or os.environ.get('SPACE_MEMORY_CLOUD_ROOT','/var/data/space-memory-cloud')
+    root = root or os.environ.get('SPACE_MEMORY_CLOUD_ROOT','/tmp/space-memory-cloud')
     service = service or CloudService(root,secret,usage_path=os.environ.get('SPACE_MEMORY_CLOUD_USAGE_PATH'))
     app.extensions['cloud_service'] = service
     assets = Path(__file__).parent/'cloud_ui'
