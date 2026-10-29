@@ -3,6 +3,7 @@ import html
 import json
 import shutil
 import tempfile
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from .timeline import timeline
@@ -12,7 +13,7 @@ from .richtext import rich_html, person_html
 from pathlib import Path
 
 
-def export_archive(archive, destination, progress=None):
+def export_archive(archive, destination, progress=None, link_media=False):
     """Snapshot rows and copy immutable verified media into a new offline directory."""
     progress = progress or (lambda message: None)
     progress('正在读取导出快照…')
@@ -28,7 +29,17 @@ def export_archive(archive, destination, progress=None):
             archive.db.execute('BEGIN')
             posts = [dict(r) for r in archive.db.execute('SELECT * FROM posts ORDER BY published_at DESC,id')]
             media = [dict(r) for r in archive.db.execute('SELECT * FROM media ORDER BY position') if photo_candidates(json.loads(r['candidates']))]
-            evidence = [dict(r) for r in archive.db.execute('SELECT post_id,source,payload FROM evidence')]
+            sources = {}
+            interactions = {}
+            for row in archive.db.execute('SELECT post_id,source,payload FROM evidence'):
+                sources.setdefault(row['post_id'], set()).add(row['source'])
+                timestamp = json.loads(row['payload']).get('interaction_time')
+                if timestamp:
+                    try:
+                        dt = datetime.fromtimestamp(int(timestamp), ZoneInfo('Asia/Shanghai'))
+                        interactions.setdefault(row['post_id'], set()).add(dt.strftime('%Y-%m-%d %H:%M:%S'))
+                    except (ValueError, TypeError, OverflowError, OSError):
+                        pass
             display_posts = {p['id']: p for p in timeline(archive, limit=1000000)['posts']}
             posts.sort(key=lambda p: (-display_posts[p['id']]['sort_time'], p['id']))
         report = []
@@ -40,29 +51,29 @@ def export_archive(archive, destination, progress=None):
             if relative and not Path(relative).is_absolute() and m['state'] == 'saved':
                 source = (archive.root / relative).resolve()
                 if source.is_relative_to(archive.root) and source.is_file():
-                    data = source.read_bytes()
-                    valid = hashlib.sha256(data).hexdigest() == m['sha256']
+                    digest = hashlib.sha256()
+                    with source.open('rb') as stream:
+                        while chunk := stream.read(256*1024):
+                            digest.update(chunk)
+                    valid = digest.hexdigest() == m['sha256']
                     if valid:
                         target = stage / relative
                         target.parent.mkdir(parents=True, exist_ok=True)
-                        target.write_bytes(data)
+                        if target.exists():
+                            pass  # Repeated slots can point to one immutable media file.
+                        elif link_media:
+                            try:
+                                os.link(source,target)
+                            except OSError:
+                                shutil.copyfile(source,target)
+                        else:
+                            shutil.copyfile(source,target)
                         copied += 1
             if not valid:
                 m['local_path'] = None
                 report.append({'media_id': m['id'], 'reason': m['error'] or 'not_saved_or_invalid'})
             progress(f'正在导出照片 {index}/{len(media)}；已写入 {copied} 张')
         progress(f'正在生成 HTML：{len(posts)} 条说说、{copied} 张照片…')
-        sources = {}
-        interactions = {}
-        for row in evidence:
-            sources.setdefault(row['post_id'], set()).add(row['source'])
-            timestamp = json.loads(row['payload']).get('interaction_time')
-            if timestamp:
-                try:
-                    dt = datetime.fromtimestamp(int(timestamp), ZoneInfo('Asia/Shanghai'))
-                    interactions.setdefault(row['post_id'], set()).add(dt.strftime('%Y-%m-%d %H:%M:%S'))
-                except (ValueError, TypeError, OverflowError, OSError):
-                    pass
         def resolve_emoji(code):
             source = archive.root.parent / 'emojis' / (code + '.gif')
             if not source.is_file():
@@ -75,11 +86,12 @@ def export_archive(archive, destination, progress=None):
         def rich(value):
             return rich_html(value or '', resolve_emoji)
         cards = []
+        media_by_post = {}
+        for m in media:
+            media_by_post.setdefault(m['post_id'],[]).append(m)
         for post in posts:
             photos = []
-            for m in media:
-                if m['post_id'] != post['id']:
-                    continue
+            for m in media_by_post.get(post['id'],[]):
                 photos.append(f'<a href="{html.escape(m["local_path"], quote=True)}"><img loading="lazy" src="{html.escape(m["local_path"], quote=True)}"></a>'
                               if m['local_path'] else '<span>图片尚未保存</span>')
             display = display_posts[post['id']]

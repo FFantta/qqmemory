@@ -19,28 +19,12 @@ from flask import Flask, abort, jsonify, request, send_file, session
 from .online import QQSession
 from .trial import run_trial, TrialLimits
 from .progress import TaskProgress
+from .large_export import standalone_html, bundle_exports, PART_BYTES, SINGLE_HTML_BYTES
 
 JOB_ID = re.compile(r'^[a-f0-9]{32}$')
-CLOUD_LIMITS = TrialLimits(scan_seconds=120, total_seconds=180, requests=40, media=12, photo_bytes=4*1024*1024)
+CLOUD_LIMITS = TrialLimits(scan_seconds=1200, total_seconds=1800, requests=1200, media=2**31-1, photo_bytes=4*1024*1024)
 
 
-def standalone_html(source, destination):
-    """Inline only verified exported image files; leave no server-only image URLs."""
-    root = source.parent.resolve()
-    document = source.read_text(encoding='utf-8')
-    def inline(match):
-        value = html.unescape(match.group(2))
-        if value.startswith(('data:', '#')):
-            return match.group(0)
-        target = (root / value).resolve()
-        if not target.is_relative_to(root) or not target.is_file():
-            raise ValueError('Invalid exported image')
-        mime = {'.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif','.webp':'image/webp'}.get(target.suffix.lower())
-        if not mime:
-            raise ValueError('Unexpected exported resource')
-        return match.group(1)+'="data:'+mime+';base64,'+base64.b64encode(target.read_bytes()).decode('ascii')+'"'
-    document = re.sub(r'(src|href)="([^"]+)"', inline, document)
-    destination.write_text(document, encoding='utf-8')
 
 
 class CloudJob:
@@ -67,12 +51,23 @@ class CloudJob:
         self.deleted = False
         self.active = True
         self.thread = None
+        self.account = None
+        self.rounds = 1
+        self.bundle_dir = None
+        self.parts = []
+        self.inline_ready = False
+        self.budget_reason = None
+        self.storage_checked = 0
+        self.storage_lock = threading.Lock()
+        self.previous_output = None
         self.persist()
 
     def persist(self):
         value = dict(schema=1, id=self.id, owner=self.owner, created=self.created, expires=self.expires,
                      phase=self.phase, message=self.message, stats=self.stats,
                      qr_refreshes=self.qr_refreshes, login_finished=self.login_finished,
+                     account=self.account, rounds=self.rounds, parts=self.parts, inline_ready=self.inline_ready,budget_reason=self.budget_reason,
+                     bundle_dir=str(self.bundle_dir.relative_to(self.root)) if self.bundle_dir else None,
                      output=str(self.output.relative_to(self.root)) if self.output else None)
         path = self.root/'job.json'
         temporary = path.with_suffix('.tmp')
@@ -85,8 +80,26 @@ class CloudJob:
                         expires=self.expires, active=self.active, stats=self.stats,
                         progress=self.progress.snapshot(self.active, self.phase),
                         ready=self.output is not None, incomplete=self.phase == 'partial',
-                        can_refresh=not self.login_finished and self.phase in ('login','error','cancelled'),
-                        qr_refreshes=self.qr_refreshes)
+                        can_refresh=self.output is None and not self.login_finished and self.phase in ('login','error','cancelled'),
+                        qr_refreshes=self.qr_refreshes, parts=self.parts, inline_ready=self.inline_ready,
+                        can_continue=self.output is not None and not self.active and not self.budget_reason,
+                        rounds=self.rounds)
+
+    def resource_guard(self):
+        with self.storage_lock:
+            if time.monotonic()-self.storage_checked < 1:
+                return not self.budget_reason
+            self.storage_checked = time.monotonic()
+            photos = self.service.job_bytes(self.root/self.account/'media') if self.account else 0
+            if photos > self.service.photo_byte_limit:
+                self.budget_reason = '本轮图片达到临时容量上限，请下载已有成果；Free 无法无限保存图片'
+            elif self.account and self.service.job_bytes(self.root/self.account/'evidence') > 64*1024**2:
+                self.budget_reason = '历史证据达到本轮内存保护容量，已保留断点和现有成果'
+            elif self.service.job_bytes(self.root) > self.service.job_byte_limit or self.service.job_bytes(self.service.root) > self.service.disk_limit:
+                self.budget_reason = '临时存储容量不足，已停止新采集并保留现有成果'
+            elif shutil.disk_usage(self.root).free < self.service.disk_reserve+photos:
+                self.budget_reason = '服务器可用磁盘不足，已预留打包空间并停止新采集'
+            return not self.budget_reason
 
     def notify(self, kind, value):
         with self.lock:
@@ -94,7 +107,7 @@ class CloudJob:
                 self.progress.update(value)
             elif kind == 'status':
                 self.message = str(value)
-            if self.service.job_bytes(self.root) > self.service.job_byte_limit:
+            if not self.resource_guard():
                 self.stop.set()
 
     def run(self):
@@ -129,23 +142,26 @@ class CloudJob:
                 self.phase, self.message = 'cancelled', '已取消扫码'
                 return
             with self.lock:
+                if self.account and self.account != str(qq.uin):
+                    raise ValueError('account_mismatch')
+                self.account = str(qq.uin)
                 self.login_finished = True
                 self.phase, self.qr = 'collecting', None
-                self.message = '正在采集；体验版范围有限，不代表完整深度找回'
+                self.message = '正在分段扫描；图片分批下载，可暂停保存并继续断点'
             timer = threading.Timer(self.service.limits.total_seconds, self.stop.set)
             timer.daemon = True
             timer.start()
             output, report = self.service.runner(qq, self.root, self.stop, self.notify,
-                media_workers=2, limits=self.service.limits)
+                media_workers=2, limits=self.service.limits, deep=True,
+                resource_guard=self.resource_guard,media_max_pending=4,link_export_media=True)
             with self.lock:
                 self.phase = 'exporting'
                 self.message = '正在生成可离线阅读的 HTML 和图片包'
-            standalone_html(Path(output), self.root/'空间记忆.html')
-            with zipfile.ZipFile(self.root/'空间记忆.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
-                for path in sorted(Path(output).parent.rglob('*')):
-                    if path.is_file() and not path.is_symlink():
-                        archive.write(path, '空间记忆/'+str(path.relative_to(Path(output).parent)))
+            bundle_dir = self.root/'bundles'/secrets.token_hex(8)
+            parts, inline_ready = bundle_exports(Path(output),bundle_dir,progress=lambda msg:self.notify('status',msg))
             with self.lock:
+                old_output, old_bundle = self.previous_output, self.bundle_dir
+                self.bundle_dir, self.parts, self.inline_ready = bundle_dir, parts, inline_ready
                 self.output = Path(output)
                 self.stats = {key:report.get(key,0) for key in ('exported_posts','exported_photos','requests')}
                 self.stats['scan_state'] = report.get('state')
@@ -154,20 +170,28 @@ class CloudJob:
                     reasons.append('采集遇到异常而中断，当前为已保存的部分结果')
                 elif report.get('state') != 'completed':
                     reasons.append('本轮已暂停或达到扫描时间／请求预算')
+                if self.budget_reason:
+                    reasons.append(self.budget_reason)
                 if report.get('exported_photos',0) >= self.service.limits.media:
                     reasons.append('达到本轮 '+str(self.service.limits.media)+' 张图片上限')
                 if report.get('issues') and not reasons:
                     reasons.append('部分来源或图片未取得，详见下载包中的采集报告')
                 self.stats['completion_notes'] = reasons
                 self.stats['diagnostic'] = report.get('diagnostic')
+                self.stats['rounds'] = self.rounds
+                self.stats['zip_parts'] = len(parts)
                 self.phase = 'partial' if reasons else 'done'
                 self.message = '；'.join(reasons) if reasons else '结果已生成，可预览或下载。体验版仅覆盖本轮取得的内容。'
+            if old_bundle and old_bundle != bundle_dir:
+                shutil.rmtree(old_bundle,ignore_errors=True)
+            if old_output and old_output.parent != Path(output).parent:
+                shutil.rmtree(old_output.parent,ignore_errors=True)
         except Exception as exc:
             # Never persist/return requests exception text, signed URLs, cookies or locals.
             self.failure = type(exc).__name__
             with self.lock:
                 self.phase = 'error'
-                self.message = '云端任务未完成，请重新扫码尝试；QQ 可能要求额外验证。' if not isinstance(exc, TimeoutError) else '扫码已超时，请重新开始。'
+                self.message = '扫码账号与原任务不一致，请使用原 QQ 继续。' if str(exc)=='account_mismatch' else '云端任务未完成，请重新扫码尝试；QQ 可能要求额外验证。' if not isinstance(exc, TimeoutError) else '扫码已超时，请重新开始。'
         finally:
             if timer:
                 timer.cancel()
@@ -176,6 +200,10 @@ class CloudJob:
             with self.lock:
                 self.qr = None
                 self.active = False
+                self.expires = time.time()+self.service.retention
+                if self.output is None and self.previous_output:
+                    self.output = self.previous_output
+                self.previous_output = None
                 self.progress.finish()
                 if not self.deleted:
                     self.persist()
@@ -187,7 +215,7 @@ class CloudJob:
 class CloudService:
     def __init__(self, root, secret, *, qq_factory=QQSession, runner=run_trial,
                  concurrency=1, retention=3600, login_seconds=180, poll_seconds=2,
-                 limits=CLOUD_LIMITS, daily_jobs=20, monthly_bytes=1024**3, usage_path=None):
+                 limits=CLOUD_LIMITS, daily_jobs=20, monthly_bytes=4*1024**3, usage_path=None):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.secret = secret.encode()
@@ -196,8 +224,10 @@ class CloudService:
         self.qq_factory, self.runner = qq_factory, runner
         self.retention, self.login_seconds, self.poll_seconds = retention, login_seconds, poll_seconds
         self.limits, self.daily_jobs, self.monthly_bytes = limits, daily_jobs, monthly_bytes
-        self.job_byte_limit = 80*1024**2
-        self.disk_limit = 600*1024**2
+        self.job_byte_limit = 2*1024**3
+        self.photo_byte_limit = 512*1024**2
+        self.disk_reserve = 512*1024**2
+        self.disk_limit = 3*1024**3
         self.lock = threading.RLock()
         self.slots = threading.BoundedSemaphore(concurrency)
         self.jobs = {}
@@ -229,10 +259,15 @@ class CloudService:
     @staticmethod
     def job_bytes(path):
         total = 0
+        seen = set()
         for p in path.rglob('*'):
             try:
                 if p.is_file() and not p.is_symlink():
-                    total += p.stat().st_size
+                    stat = p.stat()
+                    identity = (stat.st_dev,stat.st_ino)
+                    if identity not in seen:
+                        seen.add(identity)
+                        total += stat.st_size
             except FileNotFoundError:
                 pass
         return total
@@ -258,6 +293,12 @@ class CloudService:
                 job.login_finished = value.get('login_finished',bool(value.get('output')))
                 job.qr, job.thread, job.failure = None, None, None
                 job.active, job.deleted, job.stats = False, False, value.get('stats',{})
+                job.account, job.rounds = value.get('account'),value.get('rounds',1)
+                job.parts, job.inline_ready = value.get('parts',[]),value.get('inline_ready',False)
+                bundle = (path/value['bundle_dir']).resolve() if value.get('bundle_dir') else None
+                job.bundle_dir = bundle if bundle and bundle.is_relative_to(path) and bundle.is_dir() else None
+                job.budget_reason, job.storage_checked = value.get('budget_reason'),0
+                job.storage_lock, job.previous_output = threading.Lock(),None
                 candidate = (path/value['output']).resolve() if value.get('output') else None
                 job.output = candidate if candidate and candidate.is_relative_to(path) and candidate.is_file() else None
                 job.phase = value['phase'] if job.output else 'error'
@@ -304,6 +345,29 @@ class CloudService:
             job.message = '正在刷新二维码，请重新扫码并确认登录'
             job.persist()
 
+    def continue_job(self,job):
+        with self.lock,job.lock:
+            if job.active or not job.output or job.deleted or job.budget_reason:
+                raise ValueError('当前任务不能继续；请先下载已有结果')
+            if self.job_bytes(self.root)>self.disk_limit or shutil.disk_usage(self.root).free<self.disk_reserve:
+                raise ValueError('临时存储不足，请先下载结果并释放不再需要的任务')
+            if not self.slots.acquire(blocking=False):
+                raise ValueError('云端正在处理其他任务，请稍后重试')
+            day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            if not self.allowance('jobs',1,self.daily_jobs,day) or not self.allowance('owner:'+job.owner,1,10,day):
+                self.slots.release()
+                raise ValueError('今日任务额度已用完')
+            job.previous_output,job.output = job.output,None
+            job.active,job.login_finished = True,False
+            job.phase,job.message,job.qr = 'login','请用同一个 QQ 扫码，继续本任务',None
+            job.stop,job.refresh_qr,job.progress = threading.Event(),threading.Event(),TaskProgress()
+            job.qr_refreshes,job.storage_checked = 0,0
+            job.expires = time.time()+self.retention+self.limits.total_seconds+self.login_seconds
+            job.rounds+=1
+            job.persist()
+            job.thread = threading.Thread(target=job.run,daemon=True)
+            job.thread.start()
+
     def create(self, owner):
         self.cleanup()
         with self.lock:
@@ -317,8 +381,8 @@ class CloudService:
                 day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
                 if not self.allowance('jobs',1,self.daily_jobs,day):
                     raise ValueError('今日体验名额已用完，请明天再试')
-                # Limit one browser session to three attempts per UTC day.
-                if not self.allowance('owner:'+owner,1,3,day):
+                # Daily allowance includes new tasks and continuation rounds.
+                if not self.allowance('owner:'+owner,1,10,day):
                     raise ValueError('本浏览器今日体验次数已用完')
                 job = CloudJob(self,owner)
                 self.jobs[job.id] = job
@@ -398,7 +462,10 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
         owner = service.owner_hash(session['owner'])
         with service.lock:
             jobs = [j.state() for j in service.jobs.values() if j.owner==owner and j.expires>time.time() and not j.deleted]
-        return jsonify(csrf=session['csrf'], jobs=jobs, limits=dict(retention_seconds=service.retention,scan_seconds=service.limits.scan_seconds,max_photos=service.limits.media))
+        return jsonify(csrf=session['csrf'], jobs=jobs, limits=dict(retention_seconds=service.retention,
+            scan_seconds=service.limits.scan_seconds,total_seconds=service.limits.total_seconds,
+            max_photos=None if service.limits.media==2**31-1 else service.limits.media,
+            photo_bytes=service.photo_byte_limit,part_bytes=PART_BYTES))
 
     @app.post('/api/jobs')
     def create():
@@ -429,6 +496,15 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
             return jsonify(error=str(exc)),409
         return jsonify(job.state())
 
+    @app.post('/api/jobs/<identifier>/continue')
+    def continue_job(identifier):
+        job = owned(identifier)
+        try:
+            service.continue_job(job)
+        except ValueError as exc:
+            return jsonify(error=str(exc)),409
+        return jsonify(job.state())
+
     @app.delete('/api/jobs/<identifier>')
     def delete(identifier):
         service.delete(owned(identifier))
@@ -447,9 +523,14 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     @app.get('/jobs/<identifier>/download/<kind>')
     def download(identifier,kind):
         job = owned(identifier)
-        if kind not in ('html','zip'):
+        if kind=='html' and job.inline_ready and job.bundle_dir:
+            return private_file(job,job.bundle_dir/'空间记忆.html',True,'空间记忆.html')
+        if kind=='zip' and len(job.parts)==1:
+            kind=job.parts[0]['kind']
+        part=next((p for p in job.parts if p['kind']==kind),None)
+        if not part or not job.bundle_dir:
             abort(404)
-        return private_file(job,job.root/('空间记忆.'+kind),True,'空间记忆.'+kind)
+        return private_file(job,job.bundle_dir/part['file'],True,'空间记忆-'+part['file'])
 
     @app.get('/jobs/<identifier>/preview/<path:filename>')
     def preview(identifier,filename):

@@ -18,6 +18,8 @@ function render(job){
   $('qr-area').hidden=!hasQR;
   if(hasQR){$('qr').src=job.qr;$('save-qr').href=job.qr;}else{$('qr').removeAttribute('src');$('save-qr').removeAttribute('href');}
   $('results').hidden=!job.ready;
+  $('continue').hidden=!job.can_continue;
+  $('html').hidden=!job.inline_ready;
   $('stop').hidden=!job.active;
   $('stop').textContent=job.phase==='login'?'取消本次扫码':'暂停并生成已有结果';
   $('refresh-qr').hidden=!job.can_refresh;
@@ -29,6 +31,9 @@ function render(job){
   if(job.ready){
     const base='/jobs/'+encodeURIComponent(job.id);
     $('preview').href=base+'/preview/index.html';$('html').href=base+'/download/html';$('zip').href=base+'/download/zip';
+    const parts=job.parts||[]; $('zip').hidden=parts.length!==1;
+    $('zip-parts').replaceChildren();
+    if(parts.length>1)for(const [i,part] of parts.entries()){const a=document.createElement('a');a.href=base+'/download/'+encodeURIComponent(part.kind);a.textContent='下载图片包 '+(i+1)+' / '+parts.length+'（'+(part.size/1024/1024).toFixed(1)+' MiB）';$('zip-parts').appendChild(a);}
     $('stats').textContent='已保存 '+(job.stats.exported_posts||0)+' 条记录、'+(job.stats.exported_photos||0)+' 张照片。'+(job.incomplete?'本轮范围或时间有限，结果可能不完整。':'');
   }
   if(polling)clearTimeout(polling);
@@ -46,6 +51,12 @@ $('start').addEventListener('click',async()=>{
   $('start').disabled=true;$('error').textContent='';
   try{render(await api('/api/jobs','POST',{consent:$('consent').checked}));}
   catch(error){$('error').textContent=error.message;$('start').disabled=!$('consent').checked;}
+});
+$('continue').addEventListener('click',async()=>{
+  $('continue').disabled=true;
+  try{render(await api('/api/jobs/'+current.id+'/continue','POST',{}));$('error').textContent='';}
+  catch(error){$('error').textContent=error.message;}
+  finally{$('continue').disabled=false;}
 });
 $('refresh-qr').addEventListener('click',async()=>{
   $('refresh-qr').disabled=true;

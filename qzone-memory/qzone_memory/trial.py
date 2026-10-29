@@ -35,12 +35,12 @@ class TrialLimits:
             raise ValueError('Invalid collection limits')
 
 
-def run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None):
+def run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None, resource_guard=None, media_max_pending=None, link_export_media=False):
     with collection_lock(Path(root) / qq.uin):
-        return _run_trial(qq, root, stop, notify, media_workers, media_only, deep, backup_only, limits)
+        return _run_trial(qq, root, stop, notify, media_workers, media_only, deep, backup_only, limits, resource_guard, media_max_pending, link_export_media)
 
 
-def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None):
+def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None, resource_guard=None, media_max_pending=None, link_export_media=False):
     limits = limits or (TrialLimits(5400, 6000, 3600, 3000) if deep else TrialLimits())
     account = Path(root) / qq.uin
     archive = Archive(account)
@@ -57,9 +57,13 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
     raw_cards = 0
     visible_ids = set()
     def guard():
+        if resource_guard and not resource_guard():
+            stop.set()
         if stop.is_set() or time.monotonic() - started > limits.scan_seconds:
             raise Stopped()
     def media_guard():
+        if resource_guard and not resource_guard():
+            stop.set()
         if stop.is_set() or time.monotonic() - started > limits.total_seconds:
             raise Stopped()
     # Cookie jar chooses domain-scoped cookies; requests never follows media redirects.
@@ -119,7 +123,7 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
             notify('progress',dict(stage='media',done=done,total=total))
         notify('media',f'图片 {done}/{total}：本地可用 {saved}，失败 {failed}（{media_workers} 路并发）')
     pipeline = MediaPipeline(worker, media_progress,
-        workers=media_workers, limit=limits.media)
+        workers=media_workers, limit=limits.media, max_pending=media_max_pending, should_stop=stop.is_set)
     def enqueue_media():
         ids = [r['id'] for r in archive.db.execute("SELECT * FROM media ORDER BY rowid") if photo_candidates(json.loads(r['candidates'])) and needs_quality_check(r)]
         pipeline.enqueue(ids)
@@ -269,7 +273,7 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
         archive.transition(job, state)
         destination = Path(root) / 'exports' / f'{qq.uin}-{datetime.now().strftime("%Y%m%d-%H%M%S")}-{job[:6]}'
         notify('progress',dict(stage='export'))
-        export_archive(archive, destination, progress=lambda message: notify('status', message))
+        export_archive(archive, destination, progress=lambda message: notify('status', message), link_media=link_export_media)
         summary = {'job': job, 'state': state, 'requests': requests_count, 'raw_history_cards': raw_cards,
                    'current_visible_this_run': len(visible_ids), 'mode': 'media' if media_only else 'deep' if deep else 'backup' if backup_only else 'collect', 'issues': issues,
                    'exported_posts': archive.db.execute('SELECT count(*) FROM posts').fetchone()[0],

@@ -27,7 +27,7 @@ class FakeQQ:
 
 
 def fake_runner(qq, root, stop, notify, **kwargs):
-    output = Path(root)/'exports'/'test'
+    output = Path(root)/'exports'/('test-'+str(len(list((Path(root)/'exports').glob('*')))))
     (output/'media').mkdir(parents=True)
     (output/'media/a.png').write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='))
     (output/'index.html').write_text('<!doctype html><meta charset="utf-8"><p>&lt;script&gt;private&lt;/script&gt;</p><img src="media/a.png">', encoding='utf-8')
@@ -202,6 +202,44 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(job.stats['scan_state'],'failed')
         self.assertFalse(job.state()['can_refresh'])
         self.assertEqual(self.client.post('/api/jobs/'+job.id+'/refresh',json={},headers=self.headers).status_code,409)
+
+    def test_continue_keeps_account_and_checkpoints(self):
+        job=self.create()
+        checkpoint=job.root/'123'/'checkpoint.txt'
+        checkpoint.parent.mkdir();checkpoint.write_text('keep')
+        old=job.output
+        response=self.client.post('/api/jobs/'+job.id+'/continue',json={},headers=self.headers)
+        self.assertEqual(response.status_code,200)
+        job.thread.join(3)
+        self.assertFalse(job.active)
+        self.assertTrue(job.output.is_file())
+        self.assertNotEqual(job.output,old)
+        self.assertFalse(old.exists())
+        self.assertEqual(checkpoint.read_text(),'keep')
+        self.assertEqual(job.rounds,2)
+        current=job.output
+        class Wrong(FakeQQ):
+            def poll(self):
+                self.uin='456'
+                return 'ok'
+        self.service.qq_factory=Wrong
+        self.assertEqual(self.client.post('/api/jobs/'+job.id+'/continue',json={},headers=self.headers).status_code,200)
+        job.thread.join(3)
+        self.assertEqual(job.phase,'error')
+        self.assertIn('账号',job.message)
+        self.assertEqual(job.output,current)
+        self.assertTrue(current.exists())
+
+    def test_resource_capacity_stops_without_counting_photo_limit(self):
+        job=self.create()
+        self.service.photo_byte_limit=1
+        media=job.root/'123'/'media'
+        media.mkdir(parents=True)
+        (media/'a.jpg').write_bytes(b'over-limit')
+        job.storage_checked=0
+        self.assertFalse(job.resource_guard())
+        self.assertIn('容量',job.budget_reason)
+        self.assertFalse(job.state()['can_continue'])
 
     def test_secret_required_and_login_timeout(self):
         with self.assertRaises(ValueError):
