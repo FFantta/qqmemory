@@ -33,11 +33,11 @@ def data_root():
         return Path(os.environ['SPACE_MEMORY_DATA_DIR']).expanduser().resolve()
     config = Path(__file__).parent / 'ui' / 'local-config.json'
     if config.exists():
-        candidate = Path(json.loads(config.read_text())['archive_root'])
+        candidate = Path(json.loads(config.read_text(encoding='utf-8'))['archive_root'])
         if candidate.exists():
             return candidate
     if sys.platform == 'win32':
-        return Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / 'SpaceMemory'
+        return Path(os.environ.get('LOCALAPPDATA') or Path.home() / 'AppData' / 'Local') / 'SpaceMemory'
     if sys.platform == 'darwin':
         return Path.home() / 'Library' / 'Application Support' / 'SpaceMemory'
     return Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local' / 'share')) / 'SpaceMemory'
@@ -86,7 +86,7 @@ class Controller:
         if self.account:
             p = self.root/self.account/'profile.json'
             if p.exists():
-                self.nickname = json.loads(p.read_text()).get('nickname') or '我的空间'
+                self.nickname = json.loads(p.read_text(encoding='utf-8')).get('nickname') or '我的空间'
 
     def notify(self, kind, value):
         with self.lock:
@@ -241,7 +241,7 @@ class Controller:
                         remember(self.root,qq.uin)
                     profile = self.root/qq.uin
                     profile.mkdir(exist_ok=True)
-                    (profile/'profile.json').write_text(json.dumps({'nickname':self.nickname, 'uin':qq.uin}, ensure_ascii=False))
+                    (profile/'profile.json').write_text(json.dumps({'nickname':self.nickname, 'uin':qq.uin}, ensure_ascii=False), encoding='utf-8')
                     output, report = run_trial(qq, self.root, self.stop, self.notify, media_workers=self.media_workers, media_only=self.mode=='media', deep=self.mode=='deep', backup_only=self.mode=='backup')
                     self.output = output
                     self.outcome = report['state']

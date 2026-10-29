@@ -215,7 +215,7 @@ class CloudService:
             if not path.is_dir() or path.is_symlink() or not JOB_ID.fullmatch(path.name):
                 continue
             try:
-                value = json.loads((path/'job.json').read_text())
+                value = json.loads((path/'job.json').read_text(encoding='utf-8'))
                 if value.get('schema') != 1 or value.get('id') != path.name:
                     continue
                 if value['expires'] <= time.time():

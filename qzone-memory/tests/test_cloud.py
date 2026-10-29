@@ -30,7 +30,7 @@ def fake_runner(qq, root, stop, notify, **kwargs):
     output = Path(root)/'exports'/'test'
     (output/'media').mkdir(parents=True)
     (output/'media/a.png').write_bytes(base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='))
-    (output/'index.html').write_text('<!doctype html><meta charset="utf-8"><p>&lt;script&gt;private&lt;/script&gt;</p><img src="media/a.png">')
+    (output/'index.html').write_text('<!doctype html><meta charset="utf-8"><p>&lt;script&gt;private&lt;/script&gt;</p><img src="media/a.png">', encoding='utf-8')
     return output/'index.html', dict(state='completed',exported_posts=1,exported_photos=1,requests=1)
 
 
@@ -108,7 +108,7 @@ class CloudTests(unittest.TestCase):
         self.assertTrue(restored.jobs[job.id].output.is_file())
         self.assertFalse(restored.jobs[job.id].active)
         self.assertIsNone(restored.jobs[job.id].qr)
-        manifest = (job.root/'job.json').read_text()
+        manifest = (job.root/'job.json').read_text(encoding='utf-8')
         self.assertNotIn('cookie',manifest.lower())
         self.assertNotIn('qrsig',manifest)
 
@@ -141,7 +141,7 @@ class CloudTests(unittest.TestCase):
         (root/'secret.png').write_bytes(b'private')
         (root/'result').mkdir()
         source = root/'result/index.html'
-        source.write_text('<img src="../secret.png">')
+        source.write_text('<img src="../secret.png">', encoding='utf-8')
         with self.assertRaises(ValueError):
             standalone_html(source,root/'result.html')
 

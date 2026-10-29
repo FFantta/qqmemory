@@ -31,7 +31,7 @@ class RichTextTests(unittest.TestCase):
                 post=timeline(a)['posts'][0]
                 self.assertEqual(post['content_tokens'][0]['uin'],'234567')
                 self.assertEqual(post['comments'][0]['content_tokens'][0]['type'],'mention')
-                page=(export_archive(a,Path(root)/'export')/'index.html').read_text()
+                page=(export_archive(a,Path(root)/'export')/'index.html').read_text(encoding='utf-8')
                 self.assertNotIn('@{uin:',page)
                 for uin in ('234567','345678','456789'):self.assertIn('title="QQ：'+uin+'"',page)
             finally:a.close()

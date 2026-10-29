@@ -123,9 +123,9 @@ class DeepHistoryTests(unittest.TestCase):
             self.assertEqual(report['raw_history_cards'],4)
             self.assertEqual(report['mode'],'deep')
             self.assertTrue(report['deep_scan']['complete'])
-            page=output.read_text()
+            page=output.read_text(encoding='utf-8')
             for phrase in phrases:self.assertIn(phrase,page)
-            trace=json.loads(next((Path(root)/'123/evidence/deep').glob('*.json')).read_text())
+            trace=json.loads(next((Path(root)/'123/evidence/deep').glob('*.json')).read_text(encoding='utf-8'))
             self.assertNotIn('g_tk',trace['params'])
 
     def test_api_accepts_deep_mode(self):
@@ -262,11 +262,11 @@ class DeepHistoryTests(unittest.TestCase):
             a.ingest([dict(source='test',record_key='new',source_id='new',content='新采集到的旧内容',photos=[])])
             a.close()
             c=Controller(root)
-            c.output=Path(root)/'stale.html';c.output.write_text('旧导出')
+            c.output=Path(root)/'stale.html';c.output.write_text('旧导出', encoding='utf-8')
             _,url,app=create_server(c,bind=False)
             prefix='/' + url.split('/')[-2]
             with patch('qzone_memory.mac_app.webbrowser.open'):
                 response=app.test_client().post(prefix+'/api/export',json={})
             self.assertEqual(response.status_code,200)
             self.assertNotEqual(c.output,Path(root)/'stale.html')
-            self.assertIn('新采集到的旧内容',c.output.read_text())
+            self.assertIn('新采集到的旧内容',c.output.read_text(encoding='utf-8'))

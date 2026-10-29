@@ -40,7 +40,7 @@ class OnlineTests(unittest.TestCase):
             path, report = run_trial(QQ(), directory, stop, lambda *args: None)
             self.assertTrue(path.is_file())
             self.assertEqual(report['state'], 'paused')
-            self.assertEqual(json.loads((path.parent/'manifest.json').read_text())['posts'], 0)
+            self.assertEqual(json.loads((path.parent/'manifest.json').read_text(encoding='utf-8'))['posts'], 0)
 
 class LoginRedirectTests(unittest.TestCase):
     def test_http_qq_landing_is_upgraded_before_request(self):
@@ -85,7 +85,7 @@ class ResponseFailureTests(unittest.TestCase):
             def set(self):pass
         with tempfile.TemporaryDirectory() as root:
             path,report=run_trial(QQ(),root,Stop(),lambda *args:None)
-            diagnostic=(Path(root)/'123'/'last-error.json').read_text()
+            diagnostic=(Path(root)/'123'/'last-error.json').read_text(encoding='utf-8')
             self.assertIn('struct.error',diagnostic)
             self.assertIn('function',diagnostic)
             self.assertNotIn('secret',diagnostic)

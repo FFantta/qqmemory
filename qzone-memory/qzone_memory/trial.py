@@ -250,7 +250,7 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
         diagnostic = {'exception': type(exc).__module__+'.'+type(exc).__name__,
             'frames': [{'file': Path(f.filename).name, 'line': f.lineno, 'function': f.name}
                        for f in traceback.extract_tb(exc.__traceback__)]}
-        (account/'last-error.json').write_text(json.dumps(diagnostic, ensure_ascii=False, indent=2))
+        (account/'last-error.json').write_text(json.dumps(diagnostic, ensure_ascii=False, indent=2), encoding='utf-8')
         issues.append(str(exc) if isinstance(exc, ProtocolError) else '处理异常：' + type(exc).__module__+'.'+type(exc).__name__+'；定位信息已保存到 last-error.json')
         notify('error', issues[-1])
         stop.set()
@@ -270,7 +270,7 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
         summary = {'job': job, 'state': state, 'requests': requests_count, 'raw_history_cards': raw_cards,
                    'current_visible_this_run': len(visible_ids), 'mode': 'media' if media_only else 'deep' if deep else 'backup' if backup_only else 'collect', 'issues': issues,
                    'exported_posts': archive.db.execute('SELECT count(*) FROM posts').fetchone()[0],
-                   'exported_photos': json.loads((destination / 'manifest.json').read_text())['media'] - json.loads((destination / 'manifest.json').read_text())['missing_media'],
+                   'exported_photos': json.loads((destination / 'manifest.json').read_text(encoding='utf-8'))['media'] - json.loads((destination / 'manifest.json').read_text(encoding='utf-8'))['missing_media'],
                    'media_concurrency': media_workers, 'media_saved_this_run': saved, 'media_failed_this_run': failed,
                    'note': '历史来源不等于已确认删除；可能是当前列表遗漏或接口范围差异。年份窗是有限探测，不是完整历史覆盖。'}
         if deep:

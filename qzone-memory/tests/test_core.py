@@ -79,10 +79,10 @@ class CoreTests(unittest.TestCase):
         self.assertTrue(path)
         self.assertEqual(download(self.archive, mid, lambda _: self.fail('cache requested network')), path)
         out = export_archive(self.archive, self.root / 'export')
-        document = (out / 'index.html').read_text()
+        document = (out / 'index.html').read_text(encoding='utf-8')
         self.assertIn('&lt;script&gt;', document)
         self.assertTrue((out / path).is_file())
-        self.assertNotIn('qpic.cn', (out / 'data.json').read_text())
+        self.assertNotIn('qpic.cn', (out / 'data.json').read_text(encoding='utf-8'))
 
     def test_failed_media_preserves_candidates(self):
         self.archive.ingest([self.record(photos=[['https://a.qpic.cn/bad']])])
@@ -101,8 +101,8 @@ class CoreTests(unittest.TestCase):
     def test_partial_export_nine_slots(self):
         self.archive.ingest([self.record(photos=[[f'https://a.qpic.cn/{i}'] for i in range(9)])])
         out = export_archive(self.archive, self.root / 'partial')
-        self.assertEqual((out / 'index.html').read_text().count('<span>图片尚未保存</span>'), 9)
-        self.assertEqual(len(json.loads((out / 'report.json').read_text())), 9)
+        self.assertEqual((out / 'index.html').read_text(encoding='utf-8').count('<span>图片尚未保存</span>'), 9)
+        self.assertEqual(len(json.loads((out / 'report.json').read_text(encoding='utf-8'))), 9)
         with self.assertRaises(FileExistsError):
             export_archive(self.archive, out)
 
@@ -117,7 +117,7 @@ class HistoryTimeTests(unittest.TestCase):
             try:
                 archive.ingest([dict(source='history', record_key='h', source_id='h', content='old', photos=[], interaction_time='1451606400')])
                 out = export_archive(archive, Path(directory)/'export')
-                document = (out/'index.html').read_text()
+                document = (out/'index.html').read_text(encoding='utf-8')
                 self.assertIn('2016年01月01日 08:00 · ≈ 最早互动', document)
                 self.assertIsNone(archive.posts()[0]['published_at'])
             finally:

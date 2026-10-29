@@ -47,7 +47,7 @@ class EmojiTests(unittest.TestCase):
             try:
                 archive.ingest([dict(source='synthetic',record_key='one',source_id='one',content='你好[em]e142[/em]🥹',photos=[])])
                 out=export_archive(archive,root/'export')
-                page=(out/'index.html').read_text()
+                page=(out/'index.html').read_text(encoding='utf-8')
                 self.assertIn('assets/emoji/e142.gif',page)
                 self.assertNotIn('[em]e142[/em]',page)
                 self.assertTrue((out/'assets/emoji/e142.gif').is_file())

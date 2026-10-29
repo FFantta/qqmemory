@@ -10,7 +10,7 @@ def profiles(root):
         if not folder.name.isdigit() or not (folder/'archive.sqlite3').is_file():
             continue
         try:
-            profile=json.loads((folder/'profile.json').read_text()) if (folder/'profile.json').exists() else {}
+            profile=json.loads((folder/'profile.json').read_text(encoding='utf-8')) if (folder/'profile.json').exists() else {}
             db=sqlite3.connect(f'file:{folder / "archive.sqlite3"}?mode=ro',uri=True,timeout=2)
             try:
                 posts=db.execute('SELECT count(*) FROM posts').fetchone()[0]
@@ -26,13 +26,13 @@ def profiles(root):
 def remember(root,uin):
     path=Path(root)/'selected-account.json'
     temp=path.with_suffix('.tmp')
-    temp.write_text(json.dumps({'uin':uin}))
+    temp.write_text(json.dumps({'uin':uin}), encoding='utf-8')
     temp.replace(path)
 
 
 def selected(root,choices):
     try:
-        value=json.loads((Path(root)/'selected-account.json').read_text()).get('uin')
+        value=json.loads((Path(root)/'selected-account.json').read_text(encoding='utf-8')).get('uin')
         if value in choices:return value
     except (OSError,ValueError):pass
     return choices[0] if choices else None
