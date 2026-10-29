@@ -121,6 +121,16 @@ class CloudTests(unittest.TestCase):
         restored = CloudService(self.temp.name,SECRET)
         self.assertFalse(restored.allowance('bytes',1,100,month))
 
+    def test_quotas_can_persist_separately_from_private_results(self):
+        root = Path(self.temp.name)
+        usage = root/'quota-volume'/'usage.sqlite3'
+        first = CloudService(root/'ephemeral-a',SECRET,usage_path=usage)
+        self.assertTrue(first.allowance('jobs',1,1,'day'))
+        second = CloudService(root/'ephemeral-b',SECRET,usage_path=usage)
+        self.assertFalse(second.allowance('jobs',1,1,'day'))
+        self.assertEqual(list(usage.parent.iterdir()),[usage])
+        self.assertEqual(second.jobs,{})
+
     def test_busy_service_rejects_second_session(self):
         gate = threading.Event()
         def runner(*args,**kwargs):

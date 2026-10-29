@@ -161,10 +161,12 @@ class CloudJob:
 class CloudService:
     def __init__(self, root, secret, *, qq_factory=QQSession, runner=run_trial,
                  concurrency=1, retention=3600, login_seconds=180, poll_seconds=2,
-                 limits=CLOUD_LIMITS, daily_jobs=20, monthly_bytes=1024**3):
+                 limits=CLOUD_LIMITS, daily_jobs=20, monthly_bytes=1024**3, usage_path=None):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.secret = secret.encode()
+        self.usage_path = Path(usage_path) if usage_path else self.root/'usage.sqlite3'
+        self.usage_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.qq_factory, self.runner = qq_factory, runner
         self.retention, self.login_seconds, self.poll_seconds = retention, login_seconds, poll_seconds
         self.limits, self.daily_jobs, self.monthly_bytes = limits, daily_jobs, monthly_bytes
@@ -179,7 +181,7 @@ class CloudService:
 
     @contextmanager
     def database(self):
-        db = sqlite3.connect(self.root/'usage.sqlite3', timeout=10)
+        db = sqlite3.connect(self.usage_path, timeout=10)
         try:
             with db:
                 yield db
@@ -286,7 +288,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     app.config.update(SECRET_KEY=secret, MAX_CONTENT_LENGTH=4096, SESSION_COOKIE_NAME='space_memory_cloud',
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=not testing, SESSION_COOKIE_SAMESITE='Strict')
     root = root or os.environ.get('SPACE_MEMORY_CLOUD_ROOT','/var/data/space-memory-cloud')
-    service = service or CloudService(root,secret)
+    service = service or CloudService(root,secret,usage_path=os.environ.get('SPACE_MEMORY_CLOUD_USAGE_PATH'))
     app.extensions['cloud_service'] = service
     assets = Path(__file__).parent/'cloud_ui'
 

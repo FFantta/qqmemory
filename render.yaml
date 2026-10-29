@@ -8,7 +8,7 @@ services:
     startCommand: gunicorn --chdir qzone-memory --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT run_cloud:app
     healthCheckPath: /healthz
     disk:
-      name: cloud-trial-data
+      name: cloud-trial-quota
       mountPath: /var/data
       sizeGB: 1
     envVars:
@@ -17,6 +17,8 @@ services:
       - key: SPACE_MEMORY_CLOUD_SECRET
         generateValue: true
       - key: SPACE_MEMORY_CLOUD_ROOT
-        value: /var/data/space-memory-cloud
+        value: /tmp/space-memory-cloud
+      - key: SPACE_MEMORY_CLOUD_USAGE_PATH
+        value: /var/data/space-memory-cloud-usage.sqlite3
       - key: SPACE_MEMORY_CLOUD_PROXY
         value: '1'
