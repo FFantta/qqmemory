@@ -270,3 +270,29 @@ class DeepHistoryTests(unittest.TestCase):
             self.assertEqual(response.status_code,200)
             self.assertNotEqual(c.output,Path(root)/'stale.html')
             self.assertIn('新采集到的旧内容',c.output.read_text(encoding='utf-8'))
+
+    def test_page_parsing_reports_work_and_can_pause_without_advancing_cursor(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as root:
+            archive=Archive(root)
+            try:
+                tasks=[dict(label='test',params={'offset':0},pages=1,kind='feeds2',sparse=False)]
+                persist(archive,dict(tasks=tasks,index=0,page=0,next=None,requests=0,complete=False,rejected={},last_digest=None,go_order=True))
+                messages=[];paused=[False]
+                def guard():
+                    if paused[0]:raise InterruptedError('pause')
+                def parse(value,uin):
+                    result=record(value,uin);paused[0]=True;return result
+                def request(*args):return {'data':{'data':[card('one'),card('two')],'main':{'hasMoreFeeds':False}}}
+                notify=lambda kind,value:messages.append(str(value))
+                with patch('qzone_memory.deep_history.record',side_effect=parse):
+                    with self.assertRaises(InterruptedError):
+                        scan(archive,SimpleNamespace(uin='123',token=1),request,lambda records,cursor:archive.ingest(records),notify,'first',check_stop=guard)
+                self.assertEqual(load_state(archive)['page'],0)
+                self.assertIsNone(load_state(archive)['next'])
+                self.assertTrue(any('正在解析历史卡片' in m for m in messages))
+                scan(archive,SimpleNamespace(uin='123',token=1),request,lambda records,cursor:archive.ingest(records),notify,'second')
+                self.assertEqual(len(archive.posts()),2)
+                self.assertTrue(load_state(archive)['complete'])
+                self.assertTrue(any('正在保存 2 条' in m for m in messages))
+            finally:archive.close()

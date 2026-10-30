@@ -6,6 +6,7 @@ an interrupted page is replayed safely instead of losing its content.
 import hashlib
 import json
 import re
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from bs4 import BeautifulSoup
@@ -67,14 +68,16 @@ def task_order(task):
     return 7
 
 
-def page_cards(data):
+def page_cards(data,check_stop=None):
     """Accept the known feeds2/feeds3 envelopes; never turn an unknown page empty."""
     if not isinstance(data,dict):raise ProtocolError('深度历史响应不是对象')
+    check_stop=check_stop or (lambda:None)
     cards=[]
     known=False
     more=None
     def walk(node,context=False):
         nonlocal known,more
+        check_stop()
         if isinstance(node,dict):
             if 'hasMoreFeeds' in node:more=node['hasMoreFeeds']
             if 'html' in node and isinstance(node['html'],str):
@@ -93,10 +96,11 @@ def page_cards(data):
             elif node.strip():
                 raise ProtocolError('深度历史接口返回了非卡片文本')
     def split(markup,meta):
-        soup=BeautifulSoup(markup,'html.parser')
-        nodes=soup.select('li.f-single')
+        check_stop()
+        from .history_markup import split_cards
+        nodes=split_cards(markup)
         if nodes:
-            cards.extend(dict(meta,html=str(n)) for n in nodes)
+            cards.extend(dict(meta,html=n) for n in nodes)
         elif markup.strip():
             # A single card may be a div; retain it including rejected evidence.
             cards.append(dict(meta,html=markup))
@@ -115,8 +119,8 @@ def user_id(node):
     return ''
 
 
-def non_mood(markup):
-    soup=BeautifulSoup(markup,'html.parser')
+def non_mood(markup,soup=None):
+    soup=soup if soup is not None else BeautifulSoup(markup,'html.parser')
     app=soup.select_one('[data-appid]')
     if app and str(app.get('data-appid')) not in ('','311'):
         return True
@@ -124,17 +128,19 @@ def non_mood(markup):
     return '说说' not in state and any(word in state for word in ('相册','照片','留言','日志','主页'))
 
 
-def record(card,uin):
-    from .activities import activity_record
-    typed = activity_record(card, uin)
+def record(card,uin,defer_social=False):
+    from .activities import activity_record, uid
+    markup=card.get('html','')
+    soup=BeautifulSoup(markup,'html.parser')
+    typed = activity_record(card, uin, soup=soup, defer_social=defer_social)
     if typed:return typed,'typed_activity'
-    if non_mood(card.get('html','')):return None,'other_app'
-    existing=history_record(card,uin)
+    if non_mood(markup,soup):return None,'other_app'
+    from .social import social_from_tree
+    social = {'likes':[],'comments':[],'social_version':1,'details_pending':True} if defer_social else social_from_tree(soup,markup)
+    existing=history_record(card,uin,defer_social=defer_social,social=social,soup=soup)
     if existing:
         existing['interaction_time']=existing.get('interaction_time') or card.get('abstime')
         return existing,'id'
-    markup=card.get('html','')
-    soup=BeautifulSoup(markup,'html.parser')
     title=soup.select_one('p.txt-box-title')
     if title is None:return None,'missing_title'
     body_author=title.select_one('a.nickname')
@@ -143,8 +149,9 @@ def record(card,uin):
     owner=user_id(body_author)
     mentioned=any(user_id(a)==str(uin) and a.get_text(strip=True).startswith('@') for a in title.select('a'))
     mentioned=mentioned or bool(re.search(r'@\{uin:'+re.escape(str(uin))+r',',title.get_text()))
-    social = history_social(markup)
     participated = any(str(c.get('uin')) == str(uin) or any(str(r.get('uin')) == str(uin) for r in c.get('replies', [])) for c in social['comments'])
+    if defer_social:
+        participated=any(str(node.get('data-uin') or uid((node.select_one('.comments-content') or node).select_one('a.nickname')))==str(uin) for node in soup.select('.comments-item'))
     related=bool(owner and owner!=str(uin) and (mentioned or participated))
     author_name=body_author.get_text(strip=True) if body_author else ''
     state=' '.join(n.get_text(' ',strip=True) for n in soup.select('span.state'))
@@ -175,12 +182,13 @@ def record(card,uin):
     activity_id=str(root.get('id') or '') if root else ''
     identity=[activity_id,tid,user_id(actor),str(timestamp or ''),content]
     if not activity_id and not tid and not timestamp:
-        identity.append(hashlib.sha256(markup.encode()).hexdigest())
+        original=BeautifulSoup(markup,'html.parser').select_one('li.f-single')
+        identity.append(hashlib.sha256((str(original) if original else markup).encode()).hexdigest())
     key=hashlib.sha256(json.dumps(identity,ensure_ascii=False).encode()).hexdigest()
     return dict(source='related-history' if related else 'deep-history',record_key=key,source_id=tid or None,content=content,
         published_at=None,interaction_time=timestamp,photos=images_from_html(markup),evidence_html=markup,
         author={'uin':target_owner,'nickname':author_name if related else ''},category='interactions' if related else 'posts',relation='participated' if related and participated else 'mentioned' if related else 'own',ownership_basis='mentioned_account' if related else 'body_author' if owner==str(uin) else 'card_owner' if root_owner==str(uin) else 'my_mood_activity',
-        **history_social(markup)), 'id' if tid else 'activity_clue'
+        **social), 'id' if tid else 'activity_clue'
 
 
 def load_state(archive):
@@ -193,7 +201,8 @@ def persist(archive,state):
         archive.db.execute('INSERT INTO scan_checkpoints VALUES(?,?) ON CONFLICT(name) DO UPDATE SET payload=excluded.payload',(STATE_KEY,json.dumps(state,ensure_ascii=False)))
 
 
-def scan(archive,qq,request,save,notify,job):
+def scan(archive,qq,request,save,notify,job,check_stop=None,text_first=False):
+    check_stop=check_stop or (lambda:None)
     state=load_state(archive)
     if not state or state.get('complete'):
         state=dict(tasks=plan(),index=0,page=0,next=None,requests=0,raw_cards=0,complete=False,rejected={},last_digest=None)
@@ -205,9 +214,36 @@ def scan(archive,qq,request,save,notify,job):
         tasks=tasks[:index+1]+sorted(tasks[index+1:],key=task_order)
         state.update(tasks=tasks,go_order=True)
         persist(archive,state)
+    if text_first:
+        archive.db.execute('CREATE TABLE IF NOT EXISTS history_cards_seen_v1(digest TEXT PRIMARY KEY)')
+        archive.db.commit()
+        if not state.get('text_first_order'):
+            index=state['index']
+            # Preserve the current cursor; try calendar windows before dense probes.
+            def priority(task):
+                if task['label']=='顺序分页':return 0
+                if 'begin_time' in task['params']:return 1
+                if task['kind']=='feeds3':return 2
+                return 3
+            tasks=tasks[:index+1]+sorted(tasks[index+1:],key=priority)
+            state.update(tasks=tasks,text_first_order=True)
+            persist(archive,state)
+    def family(params):
+        clean={k:v for k,v in params.items() if k not in ('offset','uin','g_tk')}
+        return hashlib.sha256(json.dumps(clean,sort_keys=True).encode()).hexdigest()
+    def covered(key,begin,end):
+        return any(left<=begin and right>=end for left,right in state.get('covered_offsets',{}).get(key,[]))
+    def remember(key,begin,end):
+        ranges=sorted(state.setdefault('covered_offsets',{}).get(key,[])+[[begin,end]])
+        merged=[]
+        for left,right in ranges:
+            if merged and left<=merged[-1][1]:merged[-1][1]=max(right,merged[-1][1])
+            else:merged.append([left,right])
+        state['covered_offsets'][key]=merged
     evidence=archive.root/'evidence'/'deep'
     evidence.mkdir(parents=True,exist_ok=True)
     while state['index']<len(tasks):
+        check_stop()
         notify('progress',dict(stage='deep',done=state['index'],total=len(tasks)))
         task=tasks[state['index']]
         params=dict(task['params'])
@@ -223,15 +259,24 @@ def scan(archive,qq,request,save,notify,job):
             endpoint='feeds2_html_pav_all'
         base.update(params)
         notify('status',f'深度找回：{task["label"]}，分段 {state["index"]+1}/{len(tasks)}，第 {state["page"]+1} 页（断点自动保存）')
+        query_family=family(base)
+        if text_first and task['kind']=='feeds2' and not state['page'] and covered(query_family,base['offset'],base['offset']+task['pages']*base['count']):
+            state['skipped_covered_tasks']=state.get('skipped_covered_tasks',0)+1
+            state.update(index=state['index']+1,page=0,next=None,last_digest=None)
+            persist(archive,state)
+            continue
         # Match the Go H5 gateway first, retaining its legacy user-domain fallback.
         errors=[]
         for host in ('h5.qzone.qq.com','user.qzone.qq.com'):
             counted=False
             try:
+                check_stop()
+                notify('status',f'深度找回：分段 {state["index"]+1}/{len(tasks)}，第 {state["page"]+1} 页；正在请求历史数据'+('（备用入口）' if errors else ''))
                 payload=request('https://'+host+DOMAIN_PATH+endpoint,base)
                 state['requests']+=1
                 counted=True
-                cards,more=page_cards(payload)
+                notify('status',f'深度找回：第 {state["page"]+1} 页已返回，正在拆分历史卡片…')
+                cards,more=page_cards(payload,check_stop)
                 break
             except (requests.RequestException,ProtocolError,ValueError) as exc:
                 if not counted:state['requests']+=1
@@ -261,14 +306,34 @@ def scan(archive,qq,request,save,notify,job):
         state['raw_cards']=state.get('raw_cards',0)+len(cards)
         trace={'endpoint':endpoint,'gateway':host,'params':public,'response':payload}
         dest=evidence/f'{job}-{state["requests"]}.json'
-        dest.write_text(json.dumps(trace,ensure_ascii=False),encoding='utf-8')
-        dest.chmod(0o600)
         records=[]
-        for card in cards:
-            parsed,reason=record(card,qq.uin)
+        page_hashes=set()
+        fresh=False
+        announced=0
+        for position,card in enumerate(cards,1):
+            check_stop()
+            if position==1 or time.monotonic()-announced>=1 or position==len(cards):
+                notify('status',f'深度找回：分段 {state["index"]+1}/{len(tasks)}，第 {state["page"]+1} 页；正在解析历史卡片 {position}/{len(cards)}（本页保存后更新记录数）')
+                announced=time.monotonic()
+            fingerprint=hashlib.sha256(json.dumps(card,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+            if text_first and (fingerprint in page_hashes or archive.db.execute('SELECT 1 FROM history_cards_seen_v1 WHERE digest=?',(fingerprint,)).fetchone()):
+                state['duplicate_cards']=state.get('duplicate_cards',0)+1
+                continue
+            parsed,reason=record(card,qq.uin,defer_social=True) if text_first else record(card,qq.uin)
+            page_hashes.add(fingerprint)
+            fresh=True
             if parsed:records.append(parsed)
             else:state['rejected'][reason]=state['rejected'].get(reason,0)+1
+        if fresh or not cards:
+            dest.write_text(json.dumps(trace,ensure_ascii=False),encoding='utf-8')
+            dest.chmod(0o600)
+        notify('status',f'深度找回：第 {state["page"]+1} 页解析完成，正在保存 {len(records)} 条有效记录并处理图片…')
         save(records,dict(phase='deep-history',segment=state['index'],params=public))
+        if text_first:
+            with archive.db:
+                archive.db.executemany('INSERT OR IGNORE INTO history_cards_seen_v1 VALUES(?)',((h,) for h in page_hashes))
+            if task['kind']=='feeds2' and host=='h5.qzone.qq.com' and cards:
+                remember(query_family,base['offset'],base['offset']+len(cards))
         digest=hashlib.sha256(json.dumps(cards,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         done=not cards or digest==state['last_digest'] or state['page']+1>=task['pages']
         if task['kind']=='feeds3':
@@ -289,6 +354,8 @@ def scan(archive,qq,request,save,notify,job):
             state.update(index=state['index']+1,page=0,next=None,last_digest=None)
         state['complete']=state['index']>=len(tasks) and not state.get('retry_tasks')
         persist(archive,state)
+    state['complete']=state['index']>=len(tasks) and not state.get('retry_tasks')
+    persist(archive,state)
     notify('progress',dict(stage='deep',done=state['index'],total=len(tasks)))
     if state.get('retry_tasks'):
         state.update(tasks=state.pop('retry_tasks'),index=0,page=0,next=None,last_digest=None,consecutive_errors=0)

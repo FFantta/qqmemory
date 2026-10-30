@@ -66,7 +66,7 @@ class CloudJob:
 
     def persist(self):
         value = dict(schema=1, id=self.id, owner=self.owner, created=self.created, expires=self.expires,
-                     phase=self.phase, message=self.message, stats=self.stats,
+                     phase=self.phase, message=self.message, stats=self.stats, counts=self.counts,
                      qr_refreshes=self.qr_refreshes, login_finished=self.login_finished,
                      account=self.account, rounds=self.rounds, parts=self.parts, inline_ready=self.inline_ready,budget_reason=self.budget_reason,
                      bundle_dir=str(self.bundle_dir.relative_to(self.root)) if self.bundle_dir else None,
@@ -111,8 +111,12 @@ class CloudJob:
         with self.lock:
             if kind == 'progress':
                 self.progress.update(value)
+                if value.get('stage')=='export':
+                    self.phase='exporting'
+                    self.message='正在生成离线档案与下载文件'
             elif kind == 'counts':
-                self.counts = {k:max(0,int(value.get(k,0))) for k in ('posts','photos_found','photos_saved','photos_failed','requests')}
+                self.counts = {k:max(0,int(value.get(k,0))) for k in ('posts','photos_found','photos_saved','photos_failed','requests','details_pending')}
+                self.counts.update({k:int(value[k]) if value.get(k) is not None else None for k in ('earliest_published','earliest_interaction')})
             elif kind == 'status':
                 self.message = str(value)
             if not self.resource_guard():
@@ -162,7 +166,7 @@ class CloudJob:
             timer.start()
             output, report = self.service.runner(qq, self.root, self.stop, self.notify,
                 media_workers=2, limits=self.service.limits, deep=True,
-                resource_guard=self.resource_guard,media_max_pending=4,link_export_media=True)
+                resource_guard=self.resource_guard,media_max_pending=4,link_export_media=True,text_first=True)
             with self.lock:
                 self.phase = 'exporting'
                 self.message = '正在生成可离线阅读的 HTML 和图片包'
@@ -306,7 +310,7 @@ class CloudService:
                 job.login_finished = value.get('login_finished',bool(value.get('output')))
                 job.qr, job.thread, job.failure = None, None, None
                 job.active, job.deleted, job.stats = False, False, value.get('stats',{})
-                job.counts, job.collection_started = {}, None
+                job.counts, job.collection_started = value.get('counts',{}), None
                 job.account, job.rounds = value.get('account'),value.get('rounds',1)
                 job.parts, job.inline_ready = value.get('parts',[]),value.get('inline_ready',False)
                 bundle = (path/value['bundle_dir']).resolve() if value.get('bundle_dir') else None

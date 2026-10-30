@@ -28,7 +28,7 @@ def timeline(archive, search='', year='', limit=30, offset=0, photos_only=False,
     sources = {}
     for row in archive.db.execute('SELECT post_id,source,payload FROM evidence'):
         record = json.loads(row['payload'])
-        if record.get('evidence_html') and record.get('social_version') != 2:
+        if record.get('evidence_html') and record.get('social_version') != 2 and not record.get('details_pending'):
             record.update(history_social(record['evidence_html']))
         sources.setdefault(row['post_id'], []).append(record)
     media_by_post = {}

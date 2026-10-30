@@ -35,12 +35,21 @@ class TrialLimits:
             raise ValueError('Invalid collection limits')
 
 
-def run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None, resource_guard=None, media_max_pending=None, link_export_media=False):
+def archive_date_bounds(archive):
+    """Publication and fallback interaction dates remain separate, in epoch seconds."""
+    published=archive.db.execute("SELECT MIN(CAST(strftime('%s',published_at) AS INTEGER)) FROM posts WHERE published_at IS NOT NULL").fetchone()[0]
+    interaction=archive.db.execute("""SELECT MIN(CAST(json_extract(e.payload,'$.interaction_time') AS INTEGER))
+        FROM evidence e JOIN posts p ON p.id=e.post_id
+        WHERE p.published_at IS NULL AND CAST(json_extract(e.payload,'$.interaction_time') AS INTEGER)>0""").fetchone()[0]
+    return dict(earliest_published=published,earliest_interaction=interaction)
+
+
+def run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None, resource_guard=None, media_max_pending=None, link_export_media=False, text_first=False):
     with collection_lock(Path(root) / qq.uin):
-        return _run_trial(qq, root, stop, notify, media_workers, media_only, deep, backup_only, limits, resource_guard, media_max_pending, link_export_media)
+        return _run_trial(qq, root, stop, notify, media_workers, media_only, deep, backup_only, limits, resource_guard, media_max_pending, link_export_media, text_first)
 
 
-def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None, resource_guard=None, media_max_pending=None, link_export_media=False):
+def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=False, backup_only=False, limits=None, resource_guard=None, media_max_pending=None, link_export_media=False, text_first=False):
     limits = limits or (TrialLimits(5400, 6000, 3600, 3000) if deep else TrialLimits())
     account = Path(root) / qq.uin
     archive = Archive(account)
@@ -117,10 +126,13 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
                 return download(local, mid, transport)
         finally:
             local.close()
+    from .history_details import pending_count, enrich
+    date_bounds = archive_date_bounds(archive)
+    date_bounds['details_pending'] = pending_count(archive)
     def publish_counts():
         media = archive.db.execute("SELECT count(*),sum(state='saved'),sum(state='failed') FROM media").fetchone()
         notify('counts',dict(posts=archive.db.execute('SELECT count(*) FROM posts').fetchone()[0],
-            photos_found=media[0],photos_saved=media[1] or 0,photos_failed=media[2] or 0,requests=requests_count))
+            photos_found=media[0],photos_saved=media[1] or 0,photos_failed=media[2] or 0,requests=requests_count,**date_bounds))
     saving_images = False
     def media_progress(done,total,saved,failed):
         publish_counts()
@@ -130,6 +142,8 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
     pipeline = MediaPipeline(worker, media_progress,
         workers=media_workers, limit=limits.media, max_pending=media_max_pending, should_stop=stop.is_set)
     def enqueue_media():
+        if text_first and not saving_images:
+            return
         ids = [r['id'] for r in archive.db.execute("SELECT * FROM media ORDER BY rowid") if photo_candidates(json.loads(r['candidates'])) and needs_quality_check(r)]
         pipeline.enqueue(ids)
     def request(url, params):
@@ -152,6 +166,8 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
     def save(records, cursor):
         records = [r for r in records if r]
         archive.ingest(records, job, cursor)
+        date_bounds.update(archive_date_bounds(archive))
+        if text_first:date_bounds['details_pending']=pending_count(archive)
         publish_counts()
         enqueue_media()
         times = sorted({r.get('published_at') for r in records if r.get('published_at')})
@@ -237,7 +253,7 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
             if deep:
                 notify('progress',dict(stage='deep'))
                 from .deep_history import scan
-                scan(archive, qq, request, save, notify, job)
+                scan(archive, qq, request, save, notify, job,check_stop=guard,text_first=text_first)
             elif not backup_only:
                 notify('progress',dict(stage='history'))
                 notify('status', '正在查找历史互动中仍保留的说说线索…')
@@ -276,10 +292,36 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
         notify('error', issues[-1])
         stop.set()
     finally:
+        scan_elapsed = time.monotonic()-started
+        details_started = time.monotonic()
+        if text_first and not stop.is_set():
+            notify('status','文字与图片线索已保存，正在整理评论和点赞；暂未整理完的原始线索会保留')
+            def details_notify(kind,value):
+                if kind=='progress':
+                    date_bounds['details_pending']=max(0,(value.get('total') or 0)-value.get('done',0))
+                    publish_counts()
+                notify(kind,value)
+            try:
+                enrich(archive,details_notify,media_guard,seconds=min(120,max(0,limits.total_seconds-(time.monotonic()-started)-60)))
+            except Stopped:
+                stop.set()
+                state='paused'
+            except Exception as exc:
+                issues.append('互动细节尚未整理完，已保留原始线索：'+type(exc).__name__)
+        remaining_details=pending_count(archive)
+        date_bounds['details_pending']=remaining_details
+        if remaining_details:
+            issues.append(str(remaining_details)+' 条历史线索的评论/点赞尚待整理，文字与图片链接已保留，可继续任务补齐')
+        details_elapsed=time.monotonic()-details_started
+        media_started=time.monotonic()
         saving_images = True
+        if text_first and not stop.is_set():
+            notify('status','文字扫描已结束，现在开始下载已发现的图片')
+            enqueue_media()
         notify('progress',dict(stage='media'))
         notify('status', '正在停止并收尾图片任务…' if stop.is_set() else '正在等待图片任务收尾…')
         saved, failed, interrupted = pipeline.finish(cancel=stop.is_set())
+        media_elapsed=time.monotonic()-media_started
         if interrupted:
             issues.append(f'图片队列有 {interrupted} 项中断或尚未处理，已保留待补全状态')
         if archive.db.execute("SELECT count(*) FROM media WHERE state!='saved'").fetchone()[0]:
@@ -292,6 +334,8 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
                    'current_visible_this_run': len(visible_ids), 'mode': 'media' if media_only else 'deep' if deep else 'backup' if backup_only else 'collect', 'issues': issues,
                    'exported_posts': archive.db.execute('SELECT count(*) FROM posts').fetchone()[0],
                    'exported_photos': json.loads((destination / 'manifest.json').read_text(encoding='utf-8'))['media'] - json.loads((destination / 'manifest.json').read_text(encoding='utf-8'))['missing_media'],
+                   'text_first':text_first,'pending_social_records':remaining_details,
+                   'scan_elapsed_seconds':round(scan_elapsed,2),'details_elapsed_seconds':round(details_elapsed,2),'media_elapsed_seconds':round(media_elapsed,2),
                    'media_concurrency': media_workers, 'media_saved_this_run': saved, 'media_failed_this_run': failed,
                    'note': '历史来源不等于已确认删除；可能是当前列表遗漏或接口范围差异。年份窗是有限探测，不是完整历史覆盖。'}
         if state == 'failed':

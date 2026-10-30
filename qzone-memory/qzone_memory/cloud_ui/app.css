@@ -3,3 +3,5 @@
 #zip-parts{display:flex;flex-wrap:wrap;gap:10px}#zip-parts:empty{display:none}#continue{margin-top:15px}@media(max-width:480px){#zip-parts{flex-direction:column}}
 
 #live-status{border-block:1px solid #e3e8db;padding:12px 0;margin:16px 0}#live-counts{font-size:14px;font-variant-numeric:tabular-nums;margin:0 0 6px}#live-time{font-size:11px;color:#748168;margin:0}#stage-meter{display:block;width:100%;height:5px;margin-top:12px;accent-color:#607650}
+
+#earliest-date{font-size:12px;color:#6e805e;margin:4px 0 8px;overflow-wrap:anywhere}

@@ -177,7 +177,7 @@ def mood_record(mood):
             'photos': photos, **visible_social(mood)}
 
 
-def history_record(card, uin):
+def history_record(card, uin, defer_social=False, social=None, soup=None):
     """Conservative authorship: only clearly owned mood cards become posts."""
     markup = card.get('html', '') if isinstance(card, dict) else ''
     def attr(name):
@@ -189,7 +189,11 @@ def history_record(card, uin):
     match = re.search(r'<p\b[^>]*class=["\'][^"\']*txt-box-title[^"\']*["\'][^>]*>(.*?)</p>', markup, re.S)
     if not match:
         return None
-    text = re.sub(r'<a\b[^>]*class=["\'][^"\']*nickname[^"\']*["\'][^>]*>.*?</a>', '', match.group(1), flags=re.S)
+    body=match.group(1)
+    if soup is not None:
+        title=soup.select_one('p.txt-box-title')
+        if title is not None:body=title.decode_contents()
+    text = re.sub(r'<a\b[^>]*class=["\'][^"\']*nickname[^"\']*["\'][^>]*>.*?</a>', '', body, flags=re.S)
     text = html.unescape(re.sub('<[^>]+>', '', text)).strip()
     photos = images_from_html(markup)
     for url in re.findall(r'trueSrc\s*:\s*["\']([^"\']+)["\']', markup):
@@ -200,7 +204,7 @@ def history_record(card, uin):
     return {'source': 'history', 'record_key': hashlib.sha256(markup.encode()).hexdigest(),
             'source_id': tid, 'content': text, 'published_at': None, 'photos': photos,
             'interaction_time': attr('data-abstime'), 'evidence_html': markup,
-            'author': {'uin': str(uin), 'nickname': ''}, **history_social(markup)}
+            'author': {'uin': str(uin), 'nickname': ''}, **({'likes':[],'comments':[],'social_version':1,'details_pending':True} if defer_social else social if social is not None else history_social(markup))}
 
 
 def mobile_record(feed, uin):

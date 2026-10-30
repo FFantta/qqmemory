@@ -20,7 +20,10 @@ def visible_social(mood):
 
 @lru_cache(maxsize=8192)
 def history_social(markup):
-    soup = BeautifulSoup(markup, 'html.parser')
+    return social_from_tree(BeautifulSoup(markup, 'html.parser'), markup)
+
+
+def social_from_tree(soup, markup):
     state = soup.select_one('span.state')
     action = state.get_text(' ', strip=True) if state else ''
     actor = soup.select_one('a.f-name')

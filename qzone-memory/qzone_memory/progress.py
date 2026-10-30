@@ -2,7 +2,7 @@
 import time
 
 STAGES={'login':'扫码确认','visible':'备份当前说说','mobile':'补充互动与多图',
-        'history':'查找历史线索','deep':'深度扫描历史分段','media':'保存图片','export':'生成离线档案'}
+        'details':'整理评论和点赞','history':'查找历史线索','deep':'深度扫描历史分段','media':'保存图片','export':'生成离线档案'}
 
 
 class TaskProgress:

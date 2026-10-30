@@ -87,7 +87,7 @@ class CloudTests(unittest.TestCase):
     def test_live_counts_visible_before_export(self):
         entered, release = threading.Event(), threading.Event()
         def runner(qq,root,stop,notify,**kwargs):
-            notify('counts',dict(posts=68,photos_found=350,photos_saved=120,photos_failed=2,requests=9))
+            notify('counts',dict(posts=68,photos_found=350,photos_saved=120,photos_failed=2,requests=9,earliest_published=1577836800,earliest_interaction=1230768000))
             notify('progress',dict(stage='deep',done=10,total=100))
             entered.set()
             release.wait(2)
@@ -101,6 +101,8 @@ class CloudTests(unittest.TestCase):
             self.assertFalse(state['ready'])
             self.assertEqual(state['counts']['photos_saved'],120)
             self.assertEqual(state['counts']['posts'],68)
+            self.assertEqual(state['counts']['earliest_published'],1577836800)
+            self.assertEqual(state['counts']['earliest_interaction'],1230768000)
             self.assertEqual(state['progress']['percent'],10)
             self.assertIsNotNone(state['collection_elapsed'])
             self.assertEqual(state['collection_limit'],1800)

@@ -36,8 +36,13 @@ function render(job){
   const p=job.progress||{};
   const collecting=job.active&&['collecting','stopping','exporting'].includes(job.phase);
   $('live-status').hidden=!collecting;
+  $('earliest-date').hidden=!collecting&&!job.ready;
   const c=job.counts||{};
-  $('live-counts').textContent=Object.hasOwn(c,'posts')?'已取得 '+c.posts+' 条记录 · 图片已保存 '+c.photos_saved+' / 已发现 '+c.photos_found+' 张'+(c.photos_failed?' · 失败 '+c.photos_failed+' 张':''):'正在请求第一批内容，取得后会显示数量…';
+  $('live-counts').textContent=Object.hasOwn(c,'posts')?'已取得 '+c.posts+' 条记录 · 图片已保存 '+c.photos_saved+' / 已发现 '+c.photos_found+' 张'+(c.photos_failed?' · 失败 '+c.photos_failed+' 张':'')+(c.details_pending?' · '+c.details_pending+' 条线索的互动待整理':''):'正在请求第一批内容，取得后会显示数量…';
+  const formatDate=value=>new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(value*1000));
+  const oldest=c.earliest_published;
+  $('earliest-date').textContent=oldest!=null?'已取得说说中最早的发布时间：'+formatDate(oldest)+'（北京时间）':'最早发布时间：暂未取得';
+  if(c.earliest_interaction!=null)$('earliest-date').textContent+=' · ≈ 最早已知互动：'+formatDate(c.earliest_interaction)+'（北京时间，不代表发帖时间）';
   let timing='已用 '+duration(p.elapsed);
   if(job.collection_elapsed!=null){
     const left=Math.max(0,job.collection_limit-job.collection_elapsed);

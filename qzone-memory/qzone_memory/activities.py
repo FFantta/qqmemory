@@ -21,9 +21,9 @@ def uid(node):
     return ''
 
 
-def activity_record(card, account):
+def activity_record(card, account, soup=None, defer_social=False):
     markup = card.get('html', '')
-    soup = BeautifulSoup(markup, 'html.parser')
+    soup = soup if soup is not None else BeautifulSoup(markup, 'html.parser')
     head = soup.select_one('.f-nick span.state') or soup.select_one('span.state')
     action = head.get_text(' ', strip=True) if head else ''
     category = 'blogs' if '日志' in action else 'gifts' if any(w in action for w in ('送我', '赠送', '邀请我', '邀请你', '礼物', '卡片')) else ''
@@ -56,11 +56,12 @@ def activity_record(card, account):
     root = soup.select_one('li.f-single') or soup.find()
     resource = str(meta.get('data-tid') or '') if meta else ''
     identity = str(root.get('id') or '') if root else ''
-    key = hashlib.sha256((identity or markup).encode()).hexdigest()
+    canonical=str(root) if root and root.name=='li' and 'f-single' in root.get('class',[]) else markup
+    key = hashlib.sha256((identity or canonical).encode()).hexdigest()
     sid = f'blog:{account}:{resource}' if category == 'blogs' and resource else f'{category}:{key}'
     return dict(source='activity-history', record_key=key, source_id=sid, category=category,
                 title=title, excerpt=excerpt, content=content, published_at=None,
                 interaction_time=stamp, notification_action=action, sender=sender,
                 author={'uin': str(account), 'nickname': author_node.get_text(strip=True) if author_node else ''} if category == 'blogs' else sender,
                 photos=images_from_html(str(soup.select_one('.f-single-content') or '')),
-                evidence_html=markup, **history_social(markup))
+                evidence_html=markup, **({'likes':[],'comments':[],'social_version':1,'details_pending':True} if defer_social else history_social(markup)))
