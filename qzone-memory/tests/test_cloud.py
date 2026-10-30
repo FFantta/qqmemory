@@ -84,6 +84,55 @@ class CloudTests(unittest.TestCase):
         self.assertEqual(self.client.get('/jobs/'+job.id+'/preview/../../job.json').status_code,404)
         self.assertEqual(self.client.get('/jobs/'+job.id+'/preview/report.json').status_code,404)
 
+    def test_live_counts_visible_before_export(self):
+        entered, release = threading.Event(), threading.Event()
+        def runner(qq,root,stop,notify,**kwargs):
+            notify('counts',dict(posts=68,photos_found=350,photos_saved=120,photos_failed=2,requests=9))
+            notify('progress',dict(stage='deep',done=10,total=100))
+            entered.set()
+            release.wait(2)
+            return fake_runner(qq,root,stop,notify,**kwargs)
+        self.service.runner=runner
+        response=self.client.post('/api/jobs',json={'consent':True},headers=self.headers)
+        try:
+            self.assertTrue(entered.wait(2))
+            state=self.client.get('/api/jobs/'+response.json['id']).json
+            self.assertTrue(state['active'])
+            self.assertFalse(state['ready'])
+            self.assertEqual(state['counts']['photos_saved'],120)
+            self.assertEqual(state['counts']['posts'],68)
+            self.assertEqual(state['progress']['percent'],10)
+            self.assertIsNotNone(state['collection_elapsed'])
+            self.assertEqual(state['collection_limit'],1800)
+        finally:
+            release.set()
+
+    def test_pause_acknowledged_during_inflight_work_and_exports(self):
+        entered, release = threading.Event(), threading.Event()
+        def runner(qq,root,stop,notify,**kwargs):
+            entered.set()
+            release.wait(2)
+            self.assertTrue(stop.is_set())
+            return fake_runner(qq,root,stop,notify,**kwargs)
+        self.service.runner=runner
+        response=self.client.post('/api/jobs',json={'consent':True},headers=self.headers)
+        identifier=response.json['id']
+        try:
+            self.assertTrue(entered.wait(2))
+            stopped=self.client.post('/api/jobs/'+identifier+'/stop',json={},headers=self.headers)
+            self.assertEqual(stopped.json['phase'],'stopping')
+            self.assertTrue(stopped.json['active'])
+            job=self.service.jobs[identifier]
+            job.notify('status','深度找回：旧请求返回')
+            state=self.client.get('/api/jobs/'+identifier).json
+            self.assertEqual(state['phase'],'stopping')
+            self.assertIn('已收到暂停请求',state['message'])
+        finally:
+            release.set()
+        job.thread.join(3)
+        self.assertTrue(job.state()['ready'])
+        self.assertFalse(job.state()['active'])
+
     def test_csrf_origin_and_consent(self):
         self.assertEqual(self.client.post('/api/jobs',json={'consent':True}).status_code,403)
         self.assertEqual(self.client.post('/api/jobs',json={'consent':True},headers={**self.headers,'Origin':'https://evil.example'}).status_code,403)

@@ -18,6 +18,7 @@ class LargeExportTests(unittest.TestCase):
             data=os.urandom(64*1024)
             first=source/'media/0.jpg';first.write_bytes(data)
             for i in range(1,1001):os.link(first,source/f'media/{i}.jpg')
+            (source/'manifest.json').write_text('{}')
             index=source/'index.html';index.write_text('<!doctype html>'+''.join(f'<img src="media/{i}.jpg">' for i in range(1001)))
             tracemalloc.start()
             parts,inline=bundle_exports(index,root/'bundles',part_bytes=4*1024**2,single_html_bytes=1024)
@@ -33,6 +34,8 @@ class LargeExportTests(unittest.TestCase):
             self.assertEqual(sum(p.endswith('.jpg') for p in files),1001)
             self.assertEqual(len(files),len(set(files)))
             self.assertIn('空间记忆/index.html',files)
+            self.assertIn('空间记忆/其他/manifest.json',files)
+            self.assertEqual({n.split('/')[1] for n in files},{'index.html','media','其他'})
 
     def test_base64_chunks_reassemble_exact_original(self):
         with tempfile.TemporaryDirectory() as root:

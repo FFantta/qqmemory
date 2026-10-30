@@ -1,14 +1,20 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let csrf = '', current = null, polling = null, busy = false;
-const phases = {login:'等待 QQ 扫码',collecting:'正在整理回忆',exporting:'正在生成离线文件',done:'归档已生成',partial:'本轮结果已保存',error:'任务未完成',cancelled:'已取消'};
+let csrf = '', current = null, polling = null, busy = false, pausePending = null;
+const phases = {login:'等待 QQ 扫码',collecting:'正在整理回忆',stopping:'正在暂停并保存',exporting:'正在生成离线文件',done:'归档已生成',partial:'本轮结果已保存',error:'任务未完成',cancelled:'已取消'};
 async function api(path, method='GET', body) {
   const response = await fetch(path,{method,credentials:'same-origin',headers:method==='GET'?{}:{'Content-Type':'application/json','X-CSRF-Token':csrf},...(body?{body:JSON.stringify(body)}:{})});
   let data; try {data=await response.json();}catch {throw new Error('服务暂时不可用，请稍后重试');}
   if(!response.ok)throw new Error(data.error||'请求未完成，请重试');
   return data;
 }
+function duration(seconds){
+  const n=Math.max(0,Math.floor(Number(seconds)||0));
+  return n<60?n+' 秒':Math.floor(n/60)+' 分 '+n%60+' 秒';
+}
 function render(job){
+  if(pausePending===job.id&&job.active&&['login','collecting'].includes(job.phase))job={...job,phase:'stopping',message:'暂停请求已提交，正在等待后台确认并保存已有成果…'};
+  if(!job.active&&pausePending===job.id)pausePending=null;
   current=job;
   $('task').hidden=false;
   $('phase').textContent=phases[job.phase]||'正在处理';
@@ -21,19 +27,35 @@ function render(job){
   $('continue').hidden=!job.can_continue;
   $('html').hidden=!job.inline_ready;
   $('stop').hidden=!job.active;
-  $('stop').textContent=job.phase==='login'?'取消本次扫码':'暂停并生成已有结果';
+  $('stop').disabled=['stopping','exporting'].includes(job.phase);
+  $('stop').textContent=job.phase==='stopping'?'正在暂停并保存…':job.phase==='exporting'?'正在生成下载文件…':job.phase==='login'?'取消本次扫码':'暂停并生成已有结果';
   $('refresh-qr').hidden=!job.can_refresh;
   $('refresh-qr').disabled=job.active&&!hasQR;
   $('refresh-qr').textContent=job.active?'刷新二维码':'重新扫码';
   $('start').disabled=job.active||!$('consent').checked;
   const p=job.progress||{};
-  $('progress').textContent=p.label||p.stage||'';
+  const collecting=job.active&&['collecting','stopping','exporting'].includes(job.phase);
+  $('live-status').hidden=!collecting;
+  const c=job.counts||{};
+  $('live-counts').textContent=Object.hasOwn(c,'posts')?'已取得 '+c.posts+' 条记录 · 图片已保存 '+c.photos_saved+' / 已发现 '+c.photos_found+' 张'+(c.photos_failed?' · 失败 '+c.photos_failed+' 张':''):'正在请求第一批内容，取得后会显示数量…';
+  let timing='已用 '+duration(p.elapsed);
+  if(job.collection_elapsed!=null){
+    const left=Math.max(0,job.collection_limit-job.collection_elapsed);
+    timing+=job.phase==='exporting'?' · 正在打包，完成后出现下载入口':left?' · 本轮采集时限剩余 '+duration(left)+'，之后还需生成文件':' · 已到本轮采集时限，正在收尾并生成文件';
+  }
+  if(Array.isArray(p.eta)&&p.eta.length===2)timing+=' · 当前阶段粗估还需 '+duration(p.eta[0])+'—'+duration(p.eta[1]);
+  $('live-time').textContent=timing;
+  const measured=p.total>0&&p.percent!=null;
+  $('stage-meter').hidden=!collecting||!measured||job.phase==='stopping';
+  if(measured)$('stage-meter').value=p.percent;
+  $('progress').textContent=(p.label||p.stage||'')+(measured?' · '+p.done+' / '+p.total+'（'+p.percent+'%）':'')+(p.stage==='deep'?' · 扫描计划进度，非恢复比例':'');
+  if(job.phase==='stopping')$('progress').textContent='停止新采集 → 收尾当前网络请求 → 生成已有结果；此过程仍需一点时间。';
   if(job.ready){
     const base='/jobs/'+encodeURIComponent(job.id);
     $('preview').href=base+'/preview/index.html';$('html').href=base+'/download/html';$('zip').href=base+'/download/zip';
     const parts=job.parts||[]; $('zip').hidden=parts.length!==1;
     $('zip-parts').replaceChildren();
-    if(parts.length>1)for(const [i,part] of parts.entries()){const a=document.createElement('a');a.href=base+'/download/'+encodeURIComponent(part.kind);a.textContent='下载图片包 '+(i+1)+' / '+parts.length+'（'+(part.size/1024/1024).toFixed(1)+' MiB）';$('zip-parts').appendChild(a);}
+    if(parts.length>1)for(const [i,part] of parts.entries()){const a=document.createElement('a');a.href=base+'/download/'+encodeURIComponent(part.kind);a.textContent=(i===0?'下载第 1 包：HTML + 首批图片':'下载第 '+(i+1)+' 包：后续图片')+' / 共 '+parts.length+' 包'+'（'+(part.size/1024/1024).toFixed(1)+' MiB）';$('zip-parts').appendChild(a);}
     $('stats').textContent='已保存 '+(job.stats.exported_posts||0)+' 条记录、'+(job.stats.exported_photos||0)+' 张照片。'+(job.incomplete?'本轮范围或时间有限，结果可能不完整。':'');
   }
   if(polling)clearTimeout(polling);
@@ -63,7 +85,11 @@ $('refresh-qr').addEventListener('click',async()=>{
   try{render(await api('/api/jobs/'+current.id+'/refresh','POST',{}));$('error').textContent='';}
   catch(error){$('error').textContent=error.message;$('refresh-qr').disabled=false;}
 });
-$('stop').addEventListener('click',async()=>{try{await api('/api/jobs/'+current.id+'/stop','POST',{});$('message').textContent='正在停止并收尾，请稍候。';}catch(error){$('error').textContent=error.message;}});
+$('stop').addEventListener('click',async()=>{
+  const id=current.id;pausePending=id;render(current);
+  try{const job=await api('/api/jobs/'+id+'/stop','POST',{});if(current&&current.id===id)render(job);$('error').textContent='';}
+  catch(error){pausePending=null;if(current)render(current);$('error').textContent='暂停请求未确认：'+error.message+'。请重试暂停。';}
+});
 $('delete').addEventListener('click',async()=>{
   if(!current)return;
   if(!window.confirm('删除本次云端数据？正在运行的任务也会停止，此操作无法恢复。'))return;

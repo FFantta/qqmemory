@@ -53,3 +53,43 @@ class EmojiTests(unittest.TestCase):
                 self.assertTrue((out/'assets/emoji/e142.gif').is_file())
             finally:
                 archive.close()
+
+    def test_cloud_export_copies_avatar_emoji_and_keeps_text_only_posts(self):
+        from qzone_memory.storage import Archive
+        from qzone_memory.exporting import export_archive
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            (root/'avatars').mkdir();(root/'emojis').mkdir()
+            Image.new('RGB',(24,24),'yellow').save(root/'emojis/e142.gif',format='GIF')
+            Image.new('RGB',(24,24),'blue').save(root/'avatars/123.img',format='PNG')
+            archive=Archive(root/'123')
+            try:
+                archive.ingest([dict(source='synthetic',record_key='one',source_id='one',content='纯文字[em]e142[/em]🥹 @{uin:456,nick:好友,who:1}',photos=[])])
+                with patch('qzone_memory.export_assets.prepare_assets') as prepare:
+                    out=export_archive(archive,root/'export',fetch_assets=True)
+                    self.assertEqual(prepare.call_count,1)
+                page=(out/'index.html').read_text()
+                self.assertIn('media/avatars/123.jpg',page)
+                self.assertIn('media/emoji/e142.gif',page)
+                self.assertIn('QQ：456',page)
+                self.assertIn('.person:hover:after',page)
+                self.assertIn('纯文字',page)
+                self.assertEqual(page.count('<article '),1)
+                self.assertTrue((out/'media/avatars/123.jpg').is_file())
+                self.assertTrue((out/'media/emoji/e142.gif').is_file())
+            finally:archive.close()
+
+    def test_cloud_assets_use_public_request_without_login_cookies(self):
+        from qzone_memory.export_assets import prepare_assets
+        with tempfile.TemporaryDirectory() as root:
+            data=io.BytesIO();Image.new('RGB',(20,20),'blue').save(data,format='PNG')
+            response=MagicMock();response.__enter__.return_value=response
+            response.raw.read.return_value=data.getvalue()
+            with patch('qzone_memory.export_assets.requests.get',return_value=response) as get, patch('qzone_memory.export_assets.get_emoji') as emoji:
+                prepare_assets([{'author':{'uin':'123'},'content':'[em]e142[/em]'}],root)
+                self.assertTrue((Path(root)/'avatars/123.img').is_file())
+                self.assertEqual(emoji.call_count,1)
+                self.assertEqual(get.call_args.kwargs['params']['nk'],'123')
+                self.assertNotIn('cookies',get.call_args.kwargs)
+                self.assertFalse(get.call_args.kwargs['allow_redirects'])

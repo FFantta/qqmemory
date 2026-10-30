@@ -117,8 +117,13 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
                 return download(local, mid, transport)
         finally:
             local.close()
+    def publish_counts():
+        media = archive.db.execute("SELECT count(*),sum(state='saved'),sum(state='failed') FROM media").fetchone()
+        notify('counts',dict(posts=archive.db.execute('SELECT count(*) FROM posts').fetchone()[0],
+            photos_found=media[0],photos_saved=media[1] or 0,photos_failed=media[2] or 0,requests=requests_count))
     saving_images = False
     def media_progress(done,total,saved,failed):
+        publish_counts()
         if saving_images:
             notify('progress',dict(stage='media',done=done,total=total))
         notify('media',f'图片 {done}/{total}：本地可用 {saved}，失败 {failed}（{media_workers} 路并发）')
@@ -135,10 +140,19 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
         if stop.wait(0.8):
             raise Stopped()
         requests_count += 1
-        return qq.data(url, params)
+        previous_check = getattr(qq,'cancel_check',None)
+        qq.cancel_check = guard
+        try:
+            return qq.data(url, params)
+        finally:
+            if previous_check is None:
+                del qq.cancel_check
+            else:
+                qq.cancel_check = previous_check
     def save(records, cursor):
         records = [r for r in records if r]
         archive.ingest(records, job, cursor)
+        publish_counts()
         enqueue_media()
         times = sorted({r.get('published_at') for r in records if r.get('published_at')})
         interactions = sorted({int(r['interaction_time']) for r in records if str(r.get('interaction_time', '')).isdigit() and int(r['interaction_time']) > 0})
@@ -273,7 +287,7 @@ def _run_trial(qq, root, stop, notify, media_workers=6, media_only=False, deep=F
         archive.transition(job, state)
         destination = Path(root) / 'exports' / f'{qq.uin}-{datetime.now().strftime("%Y%m%d-%H%M%S")}-{job[:6]}'
         notify('progress',dict(stage='export'))
-        export_archive(archive, destination, progress=lambda message: notify('status', message), link_media=link_export_media)
+        export_archive(archive, destination, progress=lambda message: notify('status', message), link_media=link_export_media, fetch_assets=link_export_media)
         summary = {'job': job, 'state': state, 'requests': requests_count, 'raw_history_cards': raw_cards,
                    'current_visible_this_run': len(visible_ids), 'mode': 'media' if media_only else 'deep' if deep else 'backup' if backup_only else 'collect', 'issues': issues,
                    'exported_posts': archive.db.execute('SELECT count(*) FROM posts').fetchone()[0],

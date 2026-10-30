@@ -1,6 +1,7 @@
 """Bounded parallel media work; each task owns its database connection."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import time
 
 
 def process_media(ids, worker, progress, workers=4):
@@ -35,6 +36,7 @@ class MediaPipeline:
         self.should_stop = should_stop or (lambda:False)
         self.seen = set()
         self.completed = [0,0,0]
+        self.reported = 0
 
     def compact(self):
         if not self.capacity:
@@ -48,9 +50,11 @@ class MediaPipeline:
     def enqueue(self, ids):
         for mid in ids:
             self.compact()
+            self.heartbeat()
             if mid not in self.seen and mid not in self.futures and len(self.seen) < self.limit:
                 if self.capacity:
                     while not self.capacity.acquire(timeout=.25):
+                        self.heartbeat()
                         if self.should_stop():
                             return self.report()
                     if self.should_stop():
@@ -68,7 +72,12 @@ class MediaPipeline:
                     future.add_done_callback(lambda _:self.capacity.release())
         self.report()
 
+    def heartbeat(self):
+        if time.monotonic()-self.reported >= 1:
+            self.report()
+
     def report(self):
+        self.reported = time.monotonic()
         saved, failed, interrupted = self.completed
         for future in self.futures.values():
             if not future.done():

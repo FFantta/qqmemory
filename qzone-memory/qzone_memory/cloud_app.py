@@ -48,6 +48,8 @@ class CloudJob:
         self.output = None
         self.failure = None
         self.stats = {}
+        self.counts = {}
+        self.collection_started = None
         self.deleted = False
         self.active = True
         self.thread = None
@@ -76,9 +78,13 @@ class CloudJob:
 
     def state(self):
         with self.lock:
-            return dict(id=self.id, phase=self.phase, message=self.message, qr=self.qr,
-                        expires=self.expires, active=self.active, stats=self.stats,
-                        progress=self.progress.snapshot(self.active, self.phase),
+            phase = 'stopping' if self.active and self.stop.is_set() and self.phase in ('login','collecting') else self.phase
+            message = '已收到暂停请求，正在等待当前请求结束，然后保存已有成果；不再开始新的采集请求。' if phase=='stopping' else self.message
+            return dict(id=self.id, phase=phase, message=message, qr=self.qr,
+                        expires=self.expires, active=self.active, stats=self.stats, counts=self.counts,
+                        collection_elapsed=max(0,int(time.monotonic()-self.collection_started)) if self.collection_started and self.active else None,
+                        collection_limit=self.service.limits.total_seconds,
+                        progress=self.progress.snapshot(self.active, phase),
                         ready=self.output is not None, incomplete=self.phase == 'partial',
                         can_refresh=self.output is None and not self.login_finished and self.phase in ('login','error','cancelled'),
                         qr_refreshes=self.qr_refreshes, parts=self.parts, inline_ready=self.inline_ready,
@@ -105,6 +111,8 @@ class CloudJob:
         with self.lock:
             if kind == 'progress':
                 self.progress.update(value)
+            elif kind == 'counts':
+                self.counts = {k:max(0,int(value.get(k,0))) for k in ('posts','photos_found','photos_saved','photos_failed','requests')}
             elif kind == 'status':
                 self.message = str(value)
             if not self.resource_guard():
@@ -146,6 +154,7 @@ class CloudJob:
                     raise ValueError('account_mismatch')
                 self.account = str(qq.uin)
                 self.login_finished = True
+                self.collection_started = time.monotonic()
                 self.phase, self.qr = 'collecting', None
                 self.message = '正在分段扫描；图片分批下载，可暂停保存并继续断点'
             timer = threading.Timer(self.service.limits.total_seconds, self.stop.set)
@@ -157,6 +166,10 @@ class CloudJob:
             with self.lock:
                 self.phase = 'exporting'
                 self.message = '正在生成可离线阅读的 HTML 和图片包'
+            page=Path(output)
+            note=('本轮已暂停或达到预算，深度扫描可能尚未完成；可回到任务页用同一 QQ 继续断点。' if report.get('state')=='paused' else '本轮采集异常中断，当前为已保存的部分结果。' if report.get('state')=='failed' else '本轮已结束，不保证覆盖全部历史。')
+            note+=' 已取得 '+str(report.get('exported_posts',0))+' 条记录、'+str(report.get('exported_photos',0))+' 张照片。'
+            page.write_text(page.read_text(encoding='utf-8').replace('</h1>','</h1><p class="archive-status">'+html.escape(note)+'</p>',1),encoding='utf-8')
             bundle_dir = self.root/'bundles'/secrets.token_hex(8)
             parts, inline_ready = bundle_exports(Path(output),bundle_dir,progress=lambda msg:self.notify('status',msg))
             with self.lock:
@@ -293,6 +306,7 @@ class CloudService:
                 job.login_finished = value.get('login_finished',bool(value.get('output')))
                 job.qr, job.thread, job.failure = None, None, None
                 job.active, job.deleted, job.stats = False, False, value.get('stats',{})
+                job.counts, job.collection_started = {}, None
                 job.account, job.rounds = value.get('account'),value.get('rounds',1)
                 job.parts, job.inline_ready = value.get('parts',[]),value.get('inline_ready',False)
                 bundle = (path/value['bundle_dir']).resolve() if value.get('bundle_dir') else None
@@ -363,6 +377,7 @@ class CloudService:
             job.stop,job.refresh_qr,job.progress = threading.Event(),threading.Event(),TaskProgress()
             job.qr_refreshes,job.storage_checked = 0,0
             job.expires = time.time()+self.retention+self.limits.total_seconds+self.login_seconds
+            job.collection_started = None
             job.rounds+=1
             job.persist()
             job.thread = threading.Thread(target=job.run,daemon=True)
@@ -485,7 +500,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     def stop(identifier):
         job = owned(identifier)
         job.stop.set()
-        return jsonify(ok=True)
+        return jsonify(job.state())
 
     @app.post('/api/jobs/<identifier>/refresh')
     def refresh(identifier):

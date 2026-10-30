@@ -13,7 +13,7 @@ from .richtext import rich_html, person_html
 from pathlib import Path
 
 
-def export_archive(archive, destination, progress=None, link_media=False):
+def export_archive(archive, destination, progress=None, link_media=False, fetch_assets=False):
     """Snapshot rows and copy immutable verified media into a new offline directory."""
     progress = progress or (lambda message: None)
     progress('正在读取导出快照…')
@@ -74,15 +74,20 @@ def export_archive(archive, destination, progress=None, link_media=False):
                 report.append({'media_id': m['id'], 'reason': m['error'] or 'not_saved_or_invalid'})
             progress(f'正在导出照片 {index}/{len(media)}；已写入 {copied} 张')
         progress(f'正在生成 HTML：{len(posts)} 条说说、{copied} 张照片…')
+        if fetch_assets:
+            progress('正在补齐离线头像与 QQ 表情…')
+            from .export_assets import prepare_assets
+            prepare_assets([{'author':{'uin':archive.root.name}}]+list(display_posts.values()),archive.root.parent)
+        asset_prefix = 'media' if fetch_assets else 'assets'
         def resolve_emoji(code):
             source = archive.root.parent / 'emojis' / (code + '.gif')
             if not source.is_file():
                 return None
-            target = stage / 'assets' / 'emoji' / (code + '.gif')
+            target = stage / asset_prefix / 'emoji' / (code + '.gif')
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists():
                 target.write_bytes(source.read_bytes())
-            return 'assets/emoji/' + code + '.gif'
+            return asset_prefix+'/emoji/' + code + '.gif'
         def rich(value):
             return rich_html(value or '', resolve_emoji)
         cards = []
@@ -96,7 +101,18 @@ def export_archive(archive, destination, progress=None, link_media=False):
                               if m['local_path'] else '<span>图片尚未保存</span>')
             display = display_posts[post['id']]
             time_label = CATEGORIES[display['category']] + ' · ' + display['date'] + (' · ≈ 最早互动' if display['time_basis'] == 'interaction' else '')
-            author = person_html(dict(uin=display['author'].get('uin') or (archive.root.name if archive.root.name.isdigit() else ''), nickname=display['author'].get('nickname') or '我的空间'))
+            author_uin=str(display['author'].get('uin') or (archive.root.name if archive.root.name.isdigit() else ''))
+            author = person_html(dict(uin=author_uin, nickname=display['author'].get('nickname') or '我的空间'))
+            avatar='<span class="avatar" title="头像未取得">忆</span>'
+            if author_uin.isdigit():
+                source=archive.root.parent/'avatars'/(author_uin+'.img')
+                if source.is_file():
+                    relative=asset_prefix+'/avatars/'+author_uin+'.jpg'
+                    target=stage/relative
+                    target.parent.mkdir(parents=True,exist_ok=True)
+                    if not target.exists():shutil.copyfile(source,target)
+                    avatar='<img class="avatar" alt="头像" title="QQ：'+author_uin+'" src="'+relative+'">'
+
             social = ''
             if display['likes']:
                 social += '<div class="likes">♥ ' + '、'.join(person_html(p) for p in display['likes']) + ' 觉得很赞</div>'
@@ -104,11 +120,11 @@ def export_archive(archive, destination, progress=None, link_media=False):
                 social += '<div class="comment"><b>' + person_html(comment) + '：</b>' + rich(comment.get('content') or '') + '</div>'
                 for reply in comment.get('replies',[]):
                     social += '<div class="comment"><b>' + person_html(reply) + ' 回复：</b>' + rich(reply.get('content') or '') + '</div>'
-            cards.append('<article data-category="' + display['category'] + '"><div class="card-head"><span class="avatar">忆</span><div><b>' + author + '</b><time>' + html.escape(time_label) + '</time></div></div><p>' + rich(display['content']) + '</p><div class="photos">' + ''.join(photos) + '</div>' + social + '</article>')
+            cards.append('<article data-category="' + display['category'] + '"><div class="card-head">' + avatar + '<div><b>' + author + '</b><time>' + html.escape(time_label) + '</time></div></div><p>' + rich(display['content']) + '</p><div class="photos">' + ''.join(photos) + '</div>' + social + '</article>')
         document = '''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
-<title>空间记忆 · 离线档案</title><style>body{max-width:820px;margin:40px auto;padding:24px;font-family:system-ui;background:#f7f5fa;color:#44364f}article{padding:28px;margin:22px 0;background:white;border-radius:18px;border:1px solid #eee7f3}.card-head{display:flex;align-items:center;gap:12px;font-size:13px}.avatar{display:grid;place-items:center;width:40px;height:40px;background:#e9dff3;border-radius:50%;color:#9875b4}time{display:block;color:#ac9cbb;font-size:11px;margin-top:6px}.likes,.comment{background:#faf8fc;font-size:12px;padding:10px;margin-top:8px;color:#9881b0}p{white-space:pre-wrap;overflow-wrap:anywhere}.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}img{width:100%;height:100%;object-fit:cover}.photos>a,.photos>span{aspect-ratio:1;display:block;overflow:hidden;border-radius:10px;background:#f3eff8}.photos>span{display:grid;place-items:center;font-size:12px;color:#ad9dbf}.qq-emoji{width:1.45em;height:1.45em;vertical-align:-.28em;object-fit:contain;display:inline-block}.emoji-missing{color:#a897b9}input{padding:12px;width:80%}</style>
+<title>空间记忆 · 离线档案</title><style>body{max-width:820px;margin:40px auto;padding:24px;font-family:system-ui;background:#f7f5fa;color:#44364f}article{padding:28px;margin:22px 0;background:white;border-radius:18px;border:1px solid #eee7f3}.card-head{display:flex;align-items:center;gap:12px;font-size:13px}.avatar{flex-shrink:0;display:grid;place-items:center;width:40px;height:40px;background:#e9dff3;border-radius:50%;color:#9875b4}time{display:block;color:#ac9cbb;font-size:11px;margin-top:6px}.likes,.comment{background:#faf8fc;font-size:12px;padding:10px;margin-top:8px;color:#9881b0}p{white-space:pre-wrap;overflow-wrap:anywhere}.photos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}img{width:100%;height:100%;object-fit:cover}.photos>a,.photos>span{aspect-ratio:1;display:block;overflow:hidden;border-radius:10px;background:#f3eff8}.photos>span{display:grid;place-items:center;font-size:12px;color:#ad9dbf}.qq-emoji{width:1.45em;height:1.45em;vertical-align:-.28em;object-fit:contain;display:inline-block}.emoji-missing{color:#a897b9}input{padding:12px;width:80%}.person{position:relative;cursor:help}.person:after{content:attr(title);display:none;position:absolute;bottom:calc(100% + 5px);left:0;white-space:nowrap;background:#fffdf6;color:#4d5548;border:1px solid #dedfd4;border-radius:4px;padding:3px 7px;font:11px ui-monospace,monospace;box-shadow:0 2px 8px #0001;z-index:5}.person:hover:after,.person:focus:after{display:block}</style>
 <h1>空间记忆 · 离线年鉴</h1><p>按时间从新到旧 · ≈ 表示以最早互动时间代替缺失的发布时间。照片点击查看原始文件。</p><select id="category"><option value="">全部回忆</option><option value="posts">我的说说</option><option value="interactions">与他人互动</option><option value="gifts">礼物与游戏</option><option value="blogs">我的日志</option></select><input id="search" placeholder="搜索正文与评论">'''
         document += ''.join(cards)
         document += """<script>function filter(){const q=document.getElementById('search').value,c=document.getElementById('category').value;for(const a of document.querySelectorAll('article'))a.hidden=!(a.textContent.includes(q)&&(!c||a.dataset.category===c))}document.getElementById('search').oninput=filter;document.getElementById('category').onchange=filter;</script></html>"""

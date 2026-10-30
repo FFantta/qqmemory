@@ -92,3 +92,25 @@ class ResponseFailureTests(unittest.TestCase):
             self.assertNotIn('secret',str(report))
             self.assertEqual(report['state'],'failed')
             self.assertTrue(path.is_file())
+
+class CancellationTests(unittest.TestCase):
+    def test_cancel_during_redirect_does_not_make_next_request(self):
+        from qzone_memory.online import QQSession
+        from qzone_memory.trial import Stopped
+        from unittest.mock import Mock
+        qq=QQSession()
+        stop=threading.Event()
+        def check():
+            if stop.is_set():raise Stopped()
+        qq.cancel_check=check
+        response=Mock()
+        response.is_redirect=True
+        response.url='https://user.qzone.qq.com/'
+        response.headers={'Location':'https://user.qzone.qq.com/next'}
+        response.__enter__=Mock(side_effect=lambda:(stop.set(),response)[1])
+        response.__exit__=Mock(return_value=False)
+        qq.session.get=Mock(return_value=response)
+        try:
+            with self.assertRaises(Stopped):qq.get('https://user.qzone.qq.com/')
+            self.assertEqual(qq.session.get.call_count,1)
+        finally:qq.close()

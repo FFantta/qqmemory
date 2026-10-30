@@ -69,6 +69,8 @@ class QQSession:
 
     def get(self, url, params=None, limit=12*1024*1024):
         for _ in range(8):
+            check_cancel = getattr(self, 'cancel_check', lambda: None)
+            check_cancel()
             p = urlsplit(url)
             # QQ check_sig can return an old HTTP landing URL. Upgrade before
             # any request; never send credentials over cleartext HTTP.
@@ -78,6 +80,7 @@ class QQSession:
             if p.scheme != 'https' or p.port not in (None, 443) or p.username or p.password or not (p.hostname == 'qq.com' or (p.hostname or '').endswith('.qq.com')):
                 raise ProtocolError('登录跳转目标不在可信 QQ 域名内')
             with self.session.get(url, params=params, timeout=(10, 20), allow_redirects=False, stream=True) as response:
+                check_cancel()
                 if response.is_redirect:
                     url = urljoin(response.url, response.headers['Location'])
                     params = None
@@ -85,6 +88,7 @@ class QQSession:
                 response.raise_for_status()
                 parts, size = [], 0
                 for block in response.iter_content(65536):
+                    check_cancel()
                     size += len(block)
                     if size > limit:
                         raise ProtocolError('接口响应超过大小限制')
