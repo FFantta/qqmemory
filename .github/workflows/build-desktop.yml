@@ -1,4 +1,4 @@
-name: Desktop releases
+name: qqmemory desktop releases
 on:
   workflow_dispatch:
   push:
@@ -24,7 +24,7 @@ jobs:
       - run: python scripts/build-release.py
       - uses: actions/upload-artifact@v4
         with:
-          name: space-memory-windows-x64
+          name: qqmemory-windows-x64
           path: release-artifacts/*
           retention-days: 7
           if-no-files-found: error

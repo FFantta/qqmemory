@@ -34,8 +34,8 @@ def main():
     if system == 'Windows' and arch not in ('amd64', 'x86_64'):
         parser.error('Windows release currently requires x64 Python')
     target = ('mac-' + arch) if system == 'Darwin' else 'windows-x64'
-    env = dict(os.environ, PYTHONPATH=str(ROOT / 'qzone-memory'), PYTHONPYCACHEPREFIX=str(Path(tempfile.gettempdir()) / ('space-memory-pycache-'+target)))
-    with tempfile.TemporaryDirectory(prefix='space-memory-release-') as temp:
+    env = dict(os.environ, PYTHONPATH=str(ROOT / 'qzone-memory'), PYTHONPYCACHEPREFIX=str(Path(tempfile.gettempdir()) / ('qqmemory-pycache-'+target)))
+    with tempfile.TemporaryDirectory(prefix='qqmemory-release-') as temp:
         work = Path(temp)
         env['PYINSTALLER_CONFIG_DIR'] = str(work / 'pyinstaller-cache')
         ui = work / 'ui'
@@ -89,7 +89,7 @@ macOS 仅本地临时签名，未经苹果公证；Windows 未做发布者代码
 历史重建不等于确认原帖被删除，不能保证恢复全部历史或原图。非腾讯官方产品。
 '''
         (package/'安装与使用说明.txt').write_text(instructions, encoding='utf-8')
-        archive = output / f'space-memory-{VERSION}-{target}.zip'
+        archive = output / f'qqmemory-{VERSION}-{target}.zip'
         if system == 'Darwin':
             run('/usr/bin/ditto', '-c', '-k', '--norsrc', '--noextattr', '--keepParent', package, archive)
             extracted = work/'verified'
