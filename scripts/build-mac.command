@@ -4,7 +4,7 @@ cd -- "${0:A:h:h}"
 export PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/qqmemory-build-cache"
 export PYTHONPATH="$PWD/qqmemory"
 ./runtime/qmemory-venv/bin/python -m compileall -f -q qqmemory/qqmemory
-./runtime/qmemory-venv/bin/python -m PyInstaller --noconfirm --windowed --name 空间记忆 --osx-bundle-identifier local.qqmemory.desktop --icon "$PWD/qqmemory/assets/icon.icns" --distpath /private/tmp/qqmemory-final --workpath qqmemory/build-mac-final --specpath qqmemory --add-data "$PWD/qqmemory/qqmemory/ui:qqmemory/ui" --collect-all webview qqmemory/run_mac.py
+./runtime/qmemory-venv/bin/python -m PyInstaller --noconfirm --windowed --name 空间记忆 --osx-bundle-identifier local.qqmemory.desktop --icon "$PWD/qqmemory/assets/icon.icns" --distpath /private/tmp/qqmemory-final --workpath qqmemory/build-mac-final --specpath qqmemory --add-data "$PWD/qqmemory/qqmemory/ui:qqmemory/ui" --add-data "$PWD/qqmemory/qqmemory/templates:qqmemory/templates" --collect-all webview qqmemory/run_mac.py
 ./runtime/qmemory-venv/bin/python - <<'PYINFO'
 import plistlib
 from pathlib import Path

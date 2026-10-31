@@ -1,0 +1,11 @@
+{
+  "name": "qqmemory-development",
+  "private": true,
+  "scripts": {
+    "format:web": "prettier --write \"qqmemory/qqmemory/{ui,cloud_ui,templates}/**/*.{html,css,js}\" \"qqmemory/tests/*.cjs\" \".github/workflows/*.{yml,yaml}\" \"render.yaml\" \".prettierrc.json\" \"package.json\"",
+    "check:format:web": "prettier --check \"qqmemory/qqmemory/{ui,cloud_ui,templates}/**/*.{html,css,js}\" \"qqmemory/tests/*.cjs\" \".github/workflows/*.{yml,yaml}\" \"render.yaml\" \".prettierrc.json\" \"package.json\""
+  },
+  "devDependencies": {
+    "prettier": "3.9.10"
+  }
+}

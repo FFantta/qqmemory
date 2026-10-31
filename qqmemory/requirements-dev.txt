@@ -1,0 +1,2 @@
+# Development tools only; excluded from desktop and cloud runtime dependencies.
+ruff==0.17.3

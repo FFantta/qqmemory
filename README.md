@@ -2,6 +2,7 @@
 
 Private desktop release and cloud-trial source. No personal archives or local path configuration are included.
 
+- Development: Python uses Ruff and web source uses Prettier with pinned versions. See qqmemory/docs/CODE_READABILITY.md for commands, module responsibilities and review conventions.
 - Desktop: install qqmemory/requirements-desktop.txt, run scripts/build-release.py on macOS or Windows.
 - Windows: GitHub Actions runs offline regression tests, creates a clean x64 package and runs its packaged offline self-test.
 - Cloud: Render blueprint in render.yaml. One Gunicorn worker, eight HTTP threads, one collector at a time. QQ cookies stay in job memory. Private results expire after one hour; users can delete earlier.

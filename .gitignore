@@ -13,3 +13,6 @@ __pycache__/
 .env
 .venv/
 cloud-data/
+
+node_modules/
+.ruff_cache/

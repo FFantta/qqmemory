@@ -1,0 +1,11 @@
+runtime/
+references/
+website/
+qzone-memory/
+qqmemory/local-data/
+qqmemory/dist-mac/
+qqmemory/build*/
+qqmemory/qqmemory/ui/local-config.json
+release-artifacts/
+node_modules/
+package-lock.json

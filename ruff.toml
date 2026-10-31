@@ -1,0 +1,9 @@
+# Python source is kept readable; do not run lint auto-fixes as part of formatting.
+line-length = 100
+target-version = "py311"
+exclude = ["runtime", "references", "website", "qzone-memory", "local-data", "dist-mac", "build*", "qmemory-server.py"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"

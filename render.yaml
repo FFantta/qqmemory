@@ -19,8 +19,8 @@ services:
       - key: QQMEMORY_CLOUD_ROOT
         value: /var/data/qqmemory-cloud
       - key: QQMEMORY_CLOUD_PERSISTENT
-        value: '1'
+        value: "1"
       - key: QQMEMORY_CLOUD_DISK_MOUNT
         value: /var/data
       - key: QQMEMORY_CLOUD_PROXY
-        value: '1'
+        value: "1"
