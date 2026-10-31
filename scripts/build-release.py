@@ -13,8 +13,8 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'qzone-memory'))
-from qzone_memory.version import VERSION, BUILD
+sys.path.insert(0, str(ROOT / 'qqmemory'))
+from qqmemory.version import VERSION, BUILD
 
 
 def run(*args, **kwargs):
@@ -34,7 +34,7 @@ def main():
     if system == 'Windows' and arch not in ('amd64', 'x86_64'):
         parser.error('Windows release currently requires x64 Python')
     target = ('mac-' + arch) if system == 'Darwin' else 'windows-x64'
-    env = dict(os.environ, PYTHONPATH=str(ROOT / 'qzone-memory'), PYTHONPYCACHEPREFIX=str(Path(tempfile.gettempdir()) / ('qqmemory-pycache-'+target)))
+    env = dict(os.environ, PYTHONPATH=str(ROOT / 'qqmemory'), PYTHONPYCACHEPREFIX=str(Path(tempfile.gettempdir()) / ('qqmemory-pycache-'+target)))
     with tempfile.TemporaryDirectory(prefix='qqmemory-release-') as temp:
         work = Path(temp)
         env['PYINSTALLER_CONFIG_DIR'] = str(work / 'pyinstaller-cache')
@@ -42,15 +42,15 @@ def main():
         ui.mkdir()
         # Explicit allowlist: never package local-config.json or an archive.
         for name in ('index.html', 'app.js', 'app.css'):
-            shutil.copyfile(ROOT / 'qzone-memory/qzone_memory/ui' / name, ui / name)
+            shutil.copyfile(ROOT / 'qqmemory/qqmemory/ui' / name, ui / name)
         command = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed',
                    '--name', '空间记忆', '--distpath', str(work/'dist'), '--workpath', str(work/'build'),
-                   '--specpath', str(work), '--add-data', str(ui)+os.pathsep+'qzone_memory/ui',
+                   '--specpath', str(work), '--add-data', str(ui)+os.pathsep+'qqmemory/ui',
                    '--collect-all', 'webview', '--collect-data', 'tzdata']
         if system == 'Darwin':
-            command += ['--target-arch', arch, '--osx-bundle-identifier', 'local.spacememory.desktop',
-                        '--icon', str(ROOT/'qzone-memory/assets/icon.icns')]
-        command += [str(ROOT/'qzone-memory/run_mac.py')]
+            command += ['--target-arch', arch, '--osx-bundle-identifier', 'local.qqmemory.desktop',
+                        '--icon', str(ROOT/'qqmemory/assets/icon.icns')]
+        command += [str(ROOT/'qqmemory/run_mac.py')]
         run(*command, env=env, cwd=ROOT)
         package = work / '空间记忆'
         package.mkdir()
@@ -75,7 +75,7 @@ def main():
         for path in package.rglob('*'):
             if path.name in forbidden or path.name in ('local-data', 'LocalArchive', 'evidence', 'exports'):
                 raise RuntimeError('Private data in release: '+path.name)
-        data_path = '~/Library/Application Support/SpaceMemory' if system == 'Darwin' else '%LOCALAPPDATA%\\SpaceMemory'
+        data_path = '~/Library/Application Support/qqmemory' if system == 'Darwin' else '%LOCALAPPDATA%\\qqmemory'
         instructions = f'''空间记忆 {VERSION} · {target} 测试版
 
 macOS：将空间记忆.app 拖到应用程序后打开。

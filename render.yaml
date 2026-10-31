@@ -1,26 +1,26 @@
 services:
   - type: web
-    name: space-memory-cloud
+    name: qqmemory-cloud
     runtime: python
     plan: starter
     region: singapore
-    buildCommand: pip install -r qzone-memory/requirements-cloud.txt
-    startCommand: gunicorn --chdir qzone-memory --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT run_cloud:app
+    buildCommand: pip install -r qqmemory/requirements-cloud.txt
+    startCommand: gunicorn --chdir qqmemory --workers 1 --threads 8 --timeout 60 --bind 0.0.0.0:$PORT run_cloud:app
     healthCheckPath: /healthz
     disk:
-      name: space-memory-data
+      name: qqmemory-data
       mountPath: /var/data
       sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.12
-      - key: SPACE_MEMORY_CLOUD_SECRET
+      - key: QQMEMORY_CLOUD_SECRET
         generateValue: true
-      - key: SPACE_MEMORY_CLOUD_ROOT
-        value: /var/data/space-memory-cloud
-      - key: SPACE_MEMORY_CLOUD_PERSISTENT
+      - key: QQMEMORY_CLOUD_ROOT
+        value: /var/data/qqmemory-cloud
+      - key: QQMEMORY_CLOUD_PERSISTENT
         value: '1'
-      - key: SPACE_MEMORY_CLOUD_DISK_MOUNT
+      - key: QQMEMORY_CLOUD_DISK_MOUNT
         value: /var/data
-      - key: SPACE_MEMORY_CLOUD_PROXY
+      - key: QQMEMORY_CLOUD_PROXY
         value: '1'
