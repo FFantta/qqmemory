@@ -69,7 +69,7 @@ class EmojiTests(unittest.TestCase):
                 with patch('qzone_memory.export_assets.prepare_assets') as prepare:
                     out=export_archive(archive,root/'export',fetch_assets=True)
                     self.assertEqual(prepare.call_count,1)
-                page=(out/'index.html').read_text()
+                page=(out/'index.html').read_text(encoding='utf-8')
                 self.assertIn('media/avatars/123.jpg',page)
                 self.assertIn('media/emoji/e142.gif',page)
                 self.assertIn('QQ：456',page)

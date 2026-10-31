@@ -61,5 +61,5 @@ class LargeExportTests(unittest.TestCase):
                 with archive.db:archive.db.execute("UPDATE media SET state='saved',local_path='media/test.jpg',sha256=?",(digest,))
                 result=export_archive(archive,root/'export',link_media=True)
                 self.assertEqual((result/'media/test.jpg').stat().st_ino,source.stat().st_ino)
-                self.assertEqual((result/'index.html').read_text().count('src="media/test.jpg"'),2)
+                self.assertEqual((result/'index.html').read_text(encoding='utf-8').count('src="media/test.jpg"'),2)
             finally:archive.close()
