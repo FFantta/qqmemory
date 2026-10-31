@@ -98,7 +98,7 @@ class CloudJob:
             self.storage_checked = time.monotonic()
             photos = self.service.job_bytes(self.root/self.account/'media') if self.account else 0
             if photos > self.service.photo_byte_limit:
-                self.budget_reason = '本轮图片达到临时容量上限，请下载已有成果；Free 无法无限保存图片'
+                self.budget_reason = '本轮图片达到临时容量上限，请下载已有成果；云端容量有限'
             elif self.account and self.service.job_bytes(self.root/self.account/'evidence') > 64*1024**2:
                 self.budget_reason = '历史证据达到本轮内存保护容量，已保留断点和现有成果'
             elif self.service.job_bytes(self.root) > self.service.job_byte_limit or self.service.job_bytes(self.service.root) > self.service.disk_limit:
@@ -424,7 +424,16 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     app.config.update(SECRET_KEY=secret, MAX_CONTENT_LENGTH=4096, SESSION_COOKIE_NAME='space_memory_cloud',
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SECURE=not testing, SESSION_COOKIE_SAMESITE='Strict')
     root = root or os.environ.get('SPACE_MEMORY_CLOUD_ROOT','/tmp/space-memory-cloud')
+    persistent = os.environ.get('SPACE_MEMORY_CLOUD_PERSISTENT') == '1'
+    if persistent:
+        mount = Path(os.environ.get('SPACE_MEMORY_CLOUD_DISK_MOUNT','/var/data')).resolve()
+        actual_root = service.root if service is not None else Path(root).resolve()
+        if not actual_root.is_relative_to(mount) or actual_root == mount or not os.path.ismount(mount):
+            raise ValueError('Persistent archive root must be beneath the mounted data disk')
     service = service or CloudService(root,secret,usage_path=os.environ.get('SPACE_MEMORY_CLOUD_USAGE_PATH'))
+    if persistent:
+        # Keep room for export files; resource_guard also reserves the current photo size.
+        service.disk_reserve = 64*1024**2
     app.extensions['cloud_service'] = service
     assets = Path(__file__).parent/'cloud_ui'
 
@@ -458,11 +467,17 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
 
     @app.get('/healthz')
     def health():
-        return jsonify(ok=True)
+        return jsonify(ok=True, persistent_storage=persistent)
 
     @app.get('/')
     def index():
-        return send_file(assets/'index.html')
+        page = (assets/'index.html').read_text(encoding='utf-8')
+        if persistent:
+            page = page.replace('服务重启会中断正在运行的扫码与采集，请重新开始。免费服务闲置后会休眠，重新打开可能需等待约一分钟；休眠或重启会清空结果，请生成后立即下载。',
+                '服务不会因闲置自动休眠。归档与断点保存在持久磁盘，重启后仍可在保留期内访问；正在运行的 QQ 登录与采集会中断，需要重新扫码继续。1 GB 磁盘由所有任务共享，空间不足时会提前停止。托管商自动磁盘快照可能保留最多 7 天；删除按钮清除当前服务中的数据，不代表立即清除这些快照。')
+            page = page.replace('Free 重启会清空任务及断点，无法保证跨重启续传',
+                '归档和断点在保留期内跨重启保存；重启后需用同一浏览器、同一 QQ 重新扫码继续')
+        return app.response_class(page, mimetype='text/html')
 
     @app.get('/assets/<name>')
     def asset(name):
@@ -484,7 +499,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
         return jsonify(csrf=session['csrf'], jobs=jobs, limits=dict(retention_seconds=service.retention,
             scan_seconds=service.limits.scan_seconds,total_seconds=service.limits.total_seconds,
             max_photos=None if service.limits.media==2**31-1 else service.limits.media,
-            photo_bytes=service.photo_byte_limit,part_bytes=PART_BYTES))
+            photo_bytes=service.photo_byte_limit,part_bytes=PART_BYTES,persistent_storage=persistent))
 
     @app.post('/api/jobs')
     def create():
@@ -527,7 +542,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     @app.delete('/api/jobs/<identifier>')
     def delete(identifier):
         service.delete(owned(identifier))
-        return jsonify(ok=True)
+        return jsonify(ok=True, persistent_storage=persistent)
 
     def private_file(job, path, attachment=False, name=None):
         if not job.output:

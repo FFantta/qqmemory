@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest.mock import patch
 from qzone_memory.cloud_app import CloudService, create_cloud_app, standalone_html
 
 SECRET = 'test-secret-which-is-at-least-thirty-two-characters'
@@ -62,6 +63,24 @@ class CloudTests(unittest.TestCase):
         job.thread.join(3)
         self.assertFalse(job.active)
         return job
+
+    def test_persistent_mode_requires_real_mount_and_keeps_retention(self):
+        env = {'SPACE_MEMORY_CLOUD_PERSISTENT':'1', 'SPACE_MEMORY_CLOUD_DISK_MOUNT':self.temp.name}
+        with patch.dict('os.environ', env), patch('qzone_memory.cloud_app.os.path.ismount', return_value=False):
+            with self.assertRaisesRegex(ValueError, 'mounted data disk'):
+                create_cloud_app(root=Path(self.temp.name)/'archive', secret=SECRET, cleaner=False)
+        with patch.dict('os.environ', env), patch('qzone_memory.cloud_app.os.path.ismount', return_value=True):
+            app = create_cloud_app(root=Path(self.temp.name)/'archive', secret=SECRET, testing=True, cleaner=False)
+            client = app.test_client()
+            self.assertTrue(client.get('/healthz').json['persistent_storage'])
+            self.assertEqual(app.extensions['cloud_service'].disk_reserve,64*1024**2)
+            self.assertEqual(client.get('/api/session').json['limits']['retention_seconds'],3600)
+            page = client.get('/').get_data(as_text=True)
+            self.assertIn('最多 7 天',page)
+            self.assertNotIn('Free 重启',page)
+            self.assertNotIn('免费服务闲置',page)
+            with self.assertRaises(ValueError):
+                create_cloud_app(root='/tmp/outside-persistent-root',secret=SECRET,cleaner=False)
 
     def test_result_download_isolated_and_session_closed(self):
         job = self.create()
