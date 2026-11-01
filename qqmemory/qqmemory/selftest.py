@@ -10,7 +10,7 @@ from .mac_app import Controller, create_server
 from .locking import collection_lock, CollectionBusy
 from .storage import Archive
 from .exporting import export_archive
-from .version import VERSION
+from .version import VERSION, release_info
 
 
 def run(destination):
@@ -53,7 +53,7 @@ def run(destination):
             json.dumps(
                 dict(
                     ok=True,
-                    version=VERSION,
+                    **release_info(),
                     architecture=platform.machine(),
                     platform=platform.system(),
                 )

@@ -20,6 +20,7 @@ from flask import Flask, abort, jsonify, request, send_file, session
 from flask.sessions import SecureCookieSessionInterface
 from itsdangerous import BadSignature
 from .config import setting
+from .version import VERSION, release_info
 from .online import QQSession
 from .trial import run_trial, TrialLimits
 from .progress import TaskProgress
@@ -685,7 +686,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
 
     @app.get("/healthz")
     def health():
-        return jsonify(ok=True, persistent_storage=persistent)
+        return jsonify(ok=True, persistent_storage=persistent, **release_info())
 
     @app.get("/")
     def index():
@@ -700,6 +701,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
             if persistent
             else "Free 重启会清空任务及断点，无法保证跨重启续传"
         )
+        page = page.replace("<!-- APP_VERSION -->", html.escape(VERSION))
         page = page.replace("<!-- CLOUD_STORAGE_POLICY -->", html.escape(storage_policy))
         page = page.replace("<!-- CLOUD_CONTINUATION_POLICY -->", html.escape(continuation_policy))
         return app.response_class(page, mimetype="text/html")
@@ -785,7 +787,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     @app.delete("/api/jobs/<identifier>")
     def delete(identifier):
         service.delete(owned(identifier))
-        return jsonify(ok=True, persistent_storage=persistent)
+        return jsonify(ok=True, persistent_storage=persistent, **release_info())
 
     def private_file(job, path, attachment=False, name=None):
         if not job.output:

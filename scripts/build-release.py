@@ -34,6 +34,13 @@ def main():
         parser.error("Run this build on macOS or Windows")
     if system == "Windows" and arch not in ("amd64", "x86_64"):
         parser.error("Windows release currently requires x64 Python")
+    source_revision = os.environ.get("GITHUB_SHA") or os.environ.get("QQMEMORY_SOURCE_REVISION")
+    if (
+        not source_revision
+        or len(source_revision) != 40
+        or any(c not in "0123456789abcdef" for c in source_revision)
+    ):
+        parser.error("Set QQMEMORY_SOURCE_REVISION (or GITHUB_SHA) to the exact source commit")
     target = ("mac-" + arch) if system == "Darwin" else "windows-x64"
     env = dict(
         os.environ,
@@ -43,6 +50,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix="qqmemory-release-") as temp:
         work = Path(temp)
         env["PYINSTALLER_CONFIG_DIR"] = str(work / "pyinstaller-cache")
+        build_info = work / "build-info.json"
+        build_info.write_text(
+            json.dumps(dict(version=VERSION, build=BUILD, source_revision=source_revision)),
+            encoding="utf-8",
+        )
         ui = work / "ui"
         ui.mkdir()
         # Explicit allowlist: never package local-config.json or an archive.
@@ -67,6 +79,8 @@ def main():
             str(ui) + os.pathsep + "qqmemory/ui",
             "--add-data",
             str(ROOT / "qqmemory/qqmemory/templates") + os.pathsep + "qqmemory/templates",
+            "--add-data",
+            str(build_info) + os.pathsep + "qqmemory",
             "--collect-all",
             "webview",
             "--collect-data",
@@ -108,6 +122,8 @@ def main():
             not result.get("ok")
             or result["version"] != VERSION
             or result["architecture"].lower() != arch
+            or result.get("build") != BUILD
+            or result.get("source_revision") != source_revision
         ):
             raise RuntimeError("Packaged smoke test failed")
         forbidden = {
@@ -171,6 +187,8 @@ macOS 仅本地临时签名，未经苹果公证；Windows 未做发布者代码
                         zipped.write(path, path.relative_to(package.parent))
         manifest = dict(
             version=VERSION,
+            build=BUILD,
+            source_revision=source_revision,
             architecture=arch,
             platform=target,
             file=archive.name,

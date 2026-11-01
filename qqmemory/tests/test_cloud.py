@@ -109,6 +109,14 @@ class CloudTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 create_cloud_app(root="/tmp/outside-persistent-root", secret=SECRET, cleaner=False)
 
+    def test_health_reports_shared_release_identity(self):
+        from qqmemory.version import VERSION, BUILD
+
+        response = self.client.get("/healthz")
+        self.assertEqual(response.json["version"], VERSION)
+        self.assertEqual(response.json["build"], BUILD)
+        self.assertIn(VERSION, self.client.get("/").get_data(as_text=True))
+
     def test_formatted_root_resolves_storage_policy_markers(self):
         page = self.client.get("/").get_data(as_text=True)
         self.assertNotIn("<!-- CLOUD_", page)
