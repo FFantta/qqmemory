@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 VERSION = "0.5.3"
-BUILD = "11"
+BUILD = "12"
 
 
 def release_info():

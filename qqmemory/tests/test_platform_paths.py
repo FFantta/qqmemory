@@ -43,6 +43,24 @@ class PlatformTests(unittest.TestCase):
                 canonical.mkdir()
                 self.assertEqual(data_root(), canonical)
 
+    def test_existing_nested_archive_survives_clean_package_upgrade(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("qqmemory.mac_app.__file__", "/missing/mac_app.py"),
+            patch("qqmemory.mac_app.sys.platform", "win32"),
+            patch.dict(os.environ, {"LOCALAPPDATA": directory}, clear=True),
+        ):
+            parent = Path(directory)
+            legacy = parent / "SpaceMemory" / "LocalArchive"
+            (legacy / "123").mkdir(parents=True)
+            (legacy / "123" / "archive.sqlite3").touch()
+            (parent / "qqmemory").mkdir()
+            self.assertEqual(data_root(), legacy)
+            canonical = parent / "qqmemory"
+            (canonical / "456").mkdir()
+            (canonical / "456" / "archive.sqlite3").touch()
+            self.assertEqual(data_root(), canonical)
+
     def test_limits_require_positive_values_and_valid_deadlines(self):
         with self.assertRaises(ValueError):
             TrialLimits(scan_seconds=10, total_seconds=1)

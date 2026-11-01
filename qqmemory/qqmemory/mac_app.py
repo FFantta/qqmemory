@@ -47,6 +47,12 @@ def data_root():
     else:
         parent = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     canonical, legacy = parent / "qqmemory", parent / "SpaceMemory"
+    # Older local builds stored accounts one level deeper under LocalArchive.
+    for candidate in (canonical, legacy / "LocalArchive", legacy):
+        if candidate.is_dir() and any(
+            path.parent.name.isdigit() for path in candidate.glob("*/archive.sqlite3")
+        ):
+            return candidate
     # Continue using an existing archive; never silently create an empty second profile.
     return legacy if legacy.exists() and not canonical.exists() else canonical
 
