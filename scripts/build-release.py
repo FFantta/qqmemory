@@ -16,6 +16,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "qqmemory"))
 from qqmemory.version import VERSION, BUILD
+from build_dmg import build_dmg
 
 
 def run(*args, **kwargs):
@@ -148,7 +149,11 @@ def main():
         )
         instructions = f"""空间记忆 {VERSION} · {target} 测试版
 
-macOS：将空间记忆.app 拖到应用程序后打开。
+macOS：打开 DMG，将空间记忆.app 拖到右侧 Applications（应用程序），复制完成后从应用程序打开。
+若提示无法验证开发者：先尝试打开一次，再到“系统设置 → 隐私与安全性”，
+找到空间记忆的拦截提示，确认来源可信后点击“仍要打开”，按系统提示验证。
+本操作仅允许此应用，不需要开启“任何来源”或关闭系统安全保护。
+安装完成后可推出“空间记忆 安装”磁盘。更新前请退出旧版本。
 Windows：解压整个 ZIP 后，打开 空间记忆/空间记忆.exe；请保留同目录的依赖文件。
 Windows 需要 Microsoft Edge WebView2 Runtime（https://developer.microsoft.com/microsoft-edge/webview2/）。
 首次为空档案，点击“添加账号”，用手机 QQ 扫码确认。更新已有档案也需要扫码。
@@ -159,27 +164,9 @@ macOS 仅本地临时签名，未经苹果公证；Windows 未做发布者代码
 历史重建不等于确认原帖被删除，不能保证恢复全部历史或原图。非腾讯官方产品。
 """
         (package / "安装与使用说明.txt").write_text(instructions, encoding="utf-8")
-        archive = output / f"qqmemory-{VERSION}-{target}.zip"
+        archive = output / f"qqmemory-{VERSION}-{target}.{'dmg' if system == 'Darwin' else 'zip'}"
         if system == "Darwin":
-            run(
-                "/usr/bin/ditto",
-                "-c",
-                "-k",
-                "--norsrc",
-                "--noextattr",
-                "--keepParent",
-                package,
-                archive,
-            )
-            extracted = work / "verified"
-            run("/usr/bin/ditto", "-x", "-k", archive, extracted)
-            run(
-                "/usr/bin/codesign",
-                "--verify",
-                "--deep",
-                "--strict",
-                extracted / "空间记忆/空间记忆.app",
-            )
+            build_dmg(package / "空间记忆.app", archive, instructions)
         else:
             with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zipped:
                 for path in sorted(package.rglob("*")):

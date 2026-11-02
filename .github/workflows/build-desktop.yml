@@ -3,7 +3,14 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["qqmemory/**", "scripts/build-release.py", ".github/workflows/build-desktop.yml"]
+    paths:
+      [
+        "qqmemory/**",
+        "scripts/build-release.py",
+        "scripts/build_dmg.py",
+        "scripts/dmg-background.swift",
+        ".github/workflows/build-desktop.yml",
+      ]
 permissions:
   contents: read
 jobs:
