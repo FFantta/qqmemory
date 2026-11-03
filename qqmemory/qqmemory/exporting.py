@@ -114,9 +114,9 @@ def export_archive(archive, destination, progress=None, link_media=False, fetch_
             photos = []
             for m in media_by_post.get(post["id"], []):
                 photos.append(
-                    f'<a href="{html.escape(m["local_path"], quote=True)}"><img loading="lazy" src="{html.escape(m["local_path"], quote=True)}"></a>'
+                    f'<a class="photo" href="{html.escape(m["local_path"], quote=True)}"><img alt="归档照片" loading="lazy" src="{html.escape(m["local_path"], quote=True)}"></a>'
                     if m["local_path"]
-                    else "<span>图片尚未保存</span>"
+                    else '<span class="photo"><span>图片尚未保存</span></span>'
                 )
             display = display_posts[post["id"]]
             time_label = (
@@ -173,26 +173,59 @@ def export_archive(archive, destination, progress=None, link_media=False, fetch_
                         + "</div>"
                     )
             cards.append(
-                '<article data-category="'
+                '<article class="card" data-category="'
                 + display["category"]
+                + '" data-year="'
+                + html.escape(display["year"], quote=True)
+                + '" data-photos="'
+                + ("true" if photos else "false")
                 + '"><div class="card-head">'
                 + avatar
-                + "<div><b>"
+                + '<div class="author"><b>'
                 + author
-                + "</b><time>"
+                + '</b><time class="date">'
                 + html.escape(time_label)
-                + "</time></div></div><p>"
+                + '</time></div><span class="source">'
+                + html.escape(CATEGORIES[display["category"]])
+                + '</span></div><p class="content">'
                 + rich(display["content"])
-                + '</p><div class="photos">'
+                + '</p><div class="photos'
+                + (" single" if len(photos) == 1 else "")
+                + '">'
                 + "".join(photos)
                 + "</div>"
+                + '<div class="card-foot"><span>'
+                + (
+                    str(display.get("like_count", len(display["likes"]))) + " 人点赞"
+                    if display.get("social_available")
+                    else "点赞待补全"
+                )
+                + "</span><span>"
+                + (
+                    str(len(display["comments"])) + " 条已取得评论"
+                    if display.get("social_available")
+                    else "评论待补全"
+                )
+                + "</span><span>"
+                + str(sum(bool(m["local_path"]) for m in media_by_post.get(post["id"], [])))
+                + "/"
+                + str(len(photos))
+                + " 张已存本地</span></div>"
+                + '<div class="comments">'
                 + social
+                + "</div>"
                 + "</article>"
             )
         template = Path(__file__).parent / "templates" / "offline.html"
-        document = template.read_text(encoding="utf-8").replace(
-            "<!-- ARCHIVE_CARDS -->", "".join(cards)
+        document = template.read_text(encoding="utf-8")
+        document = document.replace(
+            "/* APP_STYLE */", (Path(__file__).parent / "ui/app.css").read_text(encoding="utf-8")
         )
+        document = document.replace(
+            "/* OFFLINE_SCRIPT */", template.with_suffix(".js").read_text(encoding="utf-8")
+        )
+        # Insert user content last; template-like text in a post stays literal.
+        document = document.replace("<!-- ARCHIVE_CARDS -->", "".join(cards))
         (stage / "index.html").write_text(document, encoding="utf-8")
         for name, value in [
             (

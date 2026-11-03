@@ -36,6 +36,19 @@ class QualityTests(unittest.TestCase):
         from qqmemory.mac_app import Controller, create_server
 
         with tempfile.TemporaryDirectory() as root:
+            archive = Archive(Path(root) / "123")
+            archive.ingest(
+                [
+                    dict(
+                        source="visible",
+                        record_key="one",
+                        source_id="one",
+                        content="test",
+                        photos=[["https://a.qpic.cn/test.jpg"]],
+                    )
+                ]
+            )
+            archive.close()
             controller = Controller(root)
             _, url, app = create_server(controller, bind=False)
             prefix = "/" + url.split("/")[-2]

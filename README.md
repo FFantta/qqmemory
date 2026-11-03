@@ -4,7 +4,25 @@
 
 [官网与下载](https://qqmemory.com/) · [问题反馈](https://github.com/FFantta/qqmemory/issues) · [MIT 许可证](LICENSE)
 
-当前版本 **0.5.3 / Build 12**，处于朋友测试阶段。提供 Apple 芯片 Mac、Intel Mac 和 Windows x64 安装包，以及有限额的云端体验。
+官网已发布版本为 **0.5.3 / Build 12**；当前源码正在准备 **0.5.4 / Build 13**，新交互仍需体验验收，尚未替换官网安装包。项目处于朋友测试阶段。提供 Apple 芯片 Mac、Intel Mac 和 Windows x64 安装包，以及有限额的云端体验。
+
+## 直接下载安装包
+
+普通用户及代为安装的 Agent 请优先下载成品，不需要克隆仓库、安装 Python 或编译。
+
+| 你的电脑 | 安装包 |
+| --- | --- |
+| Apple 芯片 Mac（M 系列） | [下载 DMG](https://qqmemory.com/downloads/qqmemory-0.5.3-mac-arm64.dmg) |
+| Intel 芯片 Mac | [下载 DMG](https://qqmemory.com/downloads/qqmemory-0.5.3-mac-x86_64.dmg) |
+| Windows x64（Intel / AMD 64 位） | [下载 ZIP](https://qqmemory.com/downloads/qqmemory-0.5.3-windows-x64.zip) |
+
+[安装说明与 Agent 指引](INSTALL.md) · [机器可读下载清单](downloads/release.json) · [GitHub Releases](https://github.com/FFantta/qqmemory/releases)
+
+可将仓库链接和这句话交给 Agent：
+
+> 帮我下载空间记忆。我只需要安装使用，不需要从源码运行。请先确认我的电脑系统和芯片，再从 README 或下载清单选择对应安装包，下载后核对 SHA-256，并说明安装步骤。
+
+如果 Agent 运行在云端，它的操作系统不代表你的电脑；无法确定时应询问你。只能聊天或不能写入本地文件的 Agent 应提供下载链接，由你点击下载。
 
 ## 能做什么
 
@@ -80,6 +98,7 @@ PYTHONPATH=qqmemory python -m unittest discover -s qqmemory/tests -q
 node qqmemory/tests/test-ui-requests.cjs
 node qqmemory/tests/test-ui-accounts.cjs
 node qqmemory/tests/test-ui-cloud-progress.cjs
+node qqmemory/tests/test-ui-offline.cjs
 npm ci --ignore-scripts
 python scripts/format-code.py --check
 npm run check:format:web

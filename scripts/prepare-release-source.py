@@ -13,7 +13,9 @@ def files():
     paths += sorted((ROOT / "qqmemory/qqmemory").glob("*.py"))
     paths += [ROOT / "qqmemory/qqmemory/ui" / name for name in ("index.html", "app.js", "app.css")]
     paths += sorted((ROOT / "qqmemory/qqmemory/cloud_ui").glob("*"))
-    paths += sorted((ROOT / "qqmemory/qqmemory/templates").glob("*.html"))
+    paths += sorted(
+        p for p in (ROOT / "qqmemory/qqmemory/templates").iterdir() if p.suffix in (".html", ".js")
+    )
     paths += [
         p
         for p in sorted((ROOT / "qqmemory/tests").iterdir())
@@ -23,6 +25,9 @@ def files():
         ROOT / path
         for path in (
             "README.md",
+            "INSTALL.md",
+            "downloads/release.json",
+            "scripts/publish-github-release.py",
             "LICENSE",
             "CONTRIBUTING.md",
             "SECURITY.md",

@@ -60,7 +60,12 @@ elements.get("workers").value = "6";
 const calls = [];
 let selected = "123",
   active = false,
-  intent;
+  intent,
+  taskId = null,
+  deferStart = false,
+  resolveStart,
+  mediaMode = false,
+  missingPhotos = 0;
 const posts = () => [
   {
     id: "post-" + selected,
@@ -79,14 +84,16 @@ const state = () => ({
   nickname: selected,
   active,
   phase: active ? "login" : "ready",
-  mode: "collect",
+  mode: mediaMode ? "media" : "collect",
+  task_id: taskId,
+  qr_status: "waiting",
   task_account: active && intent !== "add" ? selected : null,
   qr: active ? "data:image/png;base64,example" : null,
   posts: posts(),
   total: 1,
   years: ["2020"],
   category_counts: { posts: 1 },
-  stats: { posts: 1 },
+  stats: { posts: 1, photos_pending: missingPhotos },
   events: [],
   message: "saved",
   progress: { stage: "login", elapsed: 0 },
@@ -140,9 +147,18 @@ const context = vm.createContext({
     else if (path === "api/accounts/select") {
       selected = JSON.parse(options.body).uin;
       data = { ok: true };
-    } else if (path === "api/start") {
+    } else if (path === "api/start" || path === "api/upgrade") {
       intent = JSON.parse(options.body).intent;
+      mediaMode = path === "api/upgrade";
+      if (deferStart)
+        await new Promise((resolve) => {
+          resolveStart = resolve;
+        });
       active = true;
+      taskId = "task-" + calls.length;
+      data = { ok: true, started: true, task_id: taskId };
+    } else if (path === "api/stop") {
+      active = false;
       data = { ok: true };
     } else throw Error("Unexpected request " + path);
     return { ok: true, json: async () => data };
@@ -167,9 +183,56 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
     false,
   );
   await vm.runInContext("startLogin('update')", context);
+  assert.equal(elements.get("qr-dialog").open, true);
+  assert.equal(
+    calls.some((c) => c.path === "api/start"),
+    false,
+    "Settings must not start QR or network activity",
+  );
+  vm.runInContext("render(current)", context);
+  assert.equal(elements.get("qr-dialog").open, true, "Ready polling must not close settings");
+  elements.get("download-speed").value = "2";
+  elements.get("download-speed").onchange();
+  assert.equal(elements.get("workers").value, "2");
+  deferStart = true;
+  const starting = elements.get("qr-start").onclick();
+  await flush();
+  vm.runInContext("render(current)", context);
+  assert.equal(elements.get("qr-dialog").open, true, "Old state during start must not dismiss QR");
+  resolveStart();
+  await starting;
   await flush();
   assert.equal(calls.find((c) => c.path === "api/start").body.intent, "update");
+  assert.equal(calls.find((c) => c.path === "api/start").body.workers, 2);
   assert.match(elements.get("login-description").textContent, /456/);
+  vm.runInContext("render({...current, phase:'ready', active:false, task_id:'old-task'})", context);
+  assert.equal(elements.get("qr-dialog").open, true, "A different task snapshot cannot dismiss QR");
+  vm.runInContext("render({...current, phase:'login', active:true})", context);
+  assert.equal(
+    elements.get("scan-progress").hidden,
+    true,
+    "Waiting for a person must not animate a progress bar",
+  );
+  await elements.get("qr-back").onclick();
+  await flush();
+  assert.equal(elements.get("login-settings").hidden, false);
+  assert.equal(active, false);
+  await elements.get("qr-close").onclick();
+  const before = calls.length;
+  await elements.get("upgrade").onclick();
+  assert.equal(calls.length, before, "No missing photos must not request QR");
+  assert.equal(elements.get("qr-dialog").open, false);
+  missingPhotos = 3;
+  deferStart = false;
+  await vm.runInContext("poll()", context);
+  await elements.get("upgrade").onclick();
+  assert.equal(elements.get("mode-setting").hidden, true, "Image-only task has no collection mode");
+  assert.equal(elements.get("workers").disabled, false);
+  elements.get("download-speed").value = "10";
+  elements.get("download-speed").onchange();
+  await elements.get("qr-start").onclick();
+  assert.equal(calls.find((c) => c.path === "api/upgrade").body.workers, 10);
+  await elements.get("qr-close").onclick();
   vm.runInContext(
     "renderTask({active:true,phase:'collecting',task_account:'123',account:'456',mode:'deep',events:[],message:'working',progress:{stage:'deep',label:'深度扫描',done:10,total:100,percent:10,elapsed:30,eta:[100,400]}})",
     context,

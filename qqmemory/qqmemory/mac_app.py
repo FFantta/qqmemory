@@ -74,6 +74,8 @@ class Controller:
         self.phase = "ready"
         self.message = "已保存的回忆随时可看"
         self.qr = None
+        self.qr_status = "idle"
+        self.task_id = None
         self.output = None
         self.events = []
         profiles = sorted(
@@ -168,6 +170,7 @@ class Controller:
                 return False
             root = self.root / self.account
             self.task_account = self.account
+            self.task_id = secrets.token_hex(16)
             self.progress.reset()
             self.outcome = None
             self.progress.update(dict(stage="media", total=len(ids)))
@@ -233,10 +236,9 @@ class Controller:
     def start(self, workers, mode="collect", intent="update"):
         with self.lock:
             if self.active:
-                if self.phase == "login":
-                    self.media_workers = workers
-                    self.mode = mode
-                return
+                return False
+            self.task_id = secrets.token_hex(16)
+            self.qr_status = "generating"
             expected = self.account if intent == "update" else None
             self.task_account = expected
             self.progress.reset()
@@ -262,15 +264,27 @@ class Controller:
                     qr = base64.b64encode(qq.qr()).decode()
                     with self.lock:
                         self.qr = "data:image/png;base64," + qr
-                        self.message = "用手机 QQ 扫码，并在手机上确认登录"
+                        self.message = "请用手机 QQ 扫码"
+                        self.qr_status = "waiting"
                     while not self.stop.wait(2):
                         if self.refresh_qr.is_set():
                             self.refresh_qr.clear()
                             break
                         result = qq.poll()
-                        if result in ("65", "ok"):
+                        if result == "ok":
+                            break
+                        if result == "65":
+                            with self.lock:
+                                self.qr = None
+                                self.qr_status = "expired"
+                                self.message = "二维码已过期，请点击刷新二维码"
+                            while not self.stop.wait(0.2):
+                                if self.refresh_qr.is_set():
+                                    self.refresh_qr.clear()
+                                    break
                             break
                         if result in ("67", "68"):
+                            self.qr_status = "scanned"
                             self.notify("status", "已扫码，请在手机 QQ 上确认")
                 if qq.uin and not self.stop.is_set():
                     if expected and qq.uin != expected:
@@ -287,6 +301,7 @@ class Controller:
                         self.nickname = getattr(qq, "nickname", "") or self.nickname
                         self.qr = None
                         self.phase = "collecting"
+                        self.qr_status = "confirmed"
                         remember(self.root, qq.uin)
                     profile = self.root / qq.uin
                     profile.mkdir(exist_ok=True)
@@ -346,6 +361,7 @@ class Controller:
 
         self.thread = threading.Thread(target=work, daemon=False)
         self.thread.start()
+        return True
 
 
 def create_server(controller, bind=True, token=None):
@@ -406,6 +422,8 @@ def create_server(controller, bind=True, token=None):
                 media_running=list(controller.media_running),
                 media_queued=list(controller.media_queued),
                 qr=controller.qr,
+                qr_status=controller.qr_status,
+                task_id=controller.task_id,
                 account=controller.account,
                 nickname=controller.nickname,
                 events=list(controller.events),
@@ -468,23 +486,32 @@ def create_server(controller, bind=True, token=None):
         if not controller.active or controller.phase != "login":
             return jsonify(error="请先打开扫码窗口"), 409
         with controller.lock:
+            if (request.json or {}).get("task_id") not in (None, controller.task_id):
+                return jsonify(error="扫码任务已变化，请重新打开窗口"), 409
             controller.qr = None
+            controller.qr_status = "generating"
+            controller.message = "正在生成新二维码…"
             controller.refresh_qr.set()
         return jsonify(ok=True)
 
     @app.post(prefix + "/api/start")
     def start():
-        workers = int((request.json or {}).get("workers", 6))
+        try:
+            workers = int((request.json or {}).get("workers", 6))
+        except (TypeError, ValueError):
+            return jsonify(error="图片下载设置无效"), 400
         if not 1 <= workers <= 12:
-            abort(400)
+            return jsonify(error="同时下载图片数应为 1–12"), 400
         mode = (request.json or {}).get("mode", controller.mode if controller.active else "collect")
         if mode not in ("backup", "collect", "deep"):
             abort(400)
         intent = (request.json or {}).get("intent", "update")
         if intent not in ("update", "add"):
             abort(400)
-        controller.start(workers, mode=mode, intent=intent)
-        return jsonify(ok=True)
+        with controller.lock:
+            if not controller.start(workers, mode=mode, intent=intent):
+                return jsonify(error="已有任务正在运行，请先暂停并等待保存完成"), 409
+            return jsonify(ok=True, task_id=controller.task_id)
 
     @app.post(prefix + "/api/media/retry")
     def retry_media():
@@ -497,11 +524,28 @@ def create_server(controller, bind=True, token=None):
 
     @app.post(prefix + "/api/upgrade")
     def upgrade():
-        if controller.active:
-            return jsonify(error="请先停止当前采集任务"), 409
-        # Checked caches remain reusable; subsequent runs continue beyond the budget.
-        controller.start(6, mode="media")
-        return jsonify(ok=True)
+        try:
+            workers = int((request.json or {}).get("workers", 6))
+        except (TypeError, ValueError):
+            return jsonify(error="图片下载设置无效"), 400
+        if not 1 <= workers <= 12:
+            return jsonify(error="同时下载图片数应为 1–12"), 400
+        with controller.lock:
+            if controller.active:
+                return jsonify(error="请先暂停并等待保存完成"), 409
+            archive = controller.read_archive()
+            if not archive:
+                return jsonify(error="请先添加账号并备份内容"), 400
+            try:
+                missing = archive.db.execute(
+                    "SELECT count(*) FROM media WHERE state != 'saved'"
+                ).fetchone()[0]
+            finally:
+                archive.db.close()
+            if not missing:
+                return jsonify(ok=True, started=False)
+            controller.start(workers, mode="media")
+            return jsonify(ok=True, started=True, task_id=controller.task_id)
 
     @app.post(prefix + "/api/relogin")
     def relogin():
@@ -515,6 +559,8 @@ def create_server(controller, bind=True, token=None):
 
     @app.post(prefix + "/api/stop")
     def stop():
+        if (request.json or {}).get("task_id") not in (None, controller.task_id):
+            return jsonify(error="任务已变化，未取消其他任务"), 409
         if controller.active:
             login = controller.phase == "login"
             controller.stop.set()

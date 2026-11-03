@@ -35,11 +35,25 @@ async function api(path, body, signal) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         };
+  let timer;
   if (signal) options.signal = signal;
-  const response = await fetch("api/" + path, options);
-  const data = await response.json();
-  if (!response.ok) throw Error(data.error || "操作未完成");
-  return data;
+  else if (["start", "upgrade", "stop", "qr/refresh"].includes(path)) {
+    const controller = new AbortController();
+    options.signal = controller.signal;
+    timer = setTimeout(() => controller.abort(), 15000);
+  }
+  try {
+    const response = await fetch("api/" + path, options);
+    const data = await response.json();
+    if (!response.ok) throw Error(data.error || "操作未完成");
+    return data;
+  } catch (error) {
+    if (error.name === "AbortError" && !signal)
+      throw Error("本地服务响应超时，请检查任务状态后重试");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 function qqHint(element, uin) {
   const value = String(uin || "");
@@ -363,22 +377,7 @@ function render(data) {
   $("logs").replaceChildren(
     ...data.events.slice(-20).map((e) => node("div", "", `${e.time} ${e.message}`)),
   );
-  if (data.phase === "login" && data.qr) {
-    $("qr-image").src = data.qr;
-    $("qr-image").style.display = "block";
-    $("qr-loading").style.display = "none";
-    $("qr-message").textContent = data.message;
-    $("scan-mode").disabled = data.mode === "media";
-    $("workers").disabled = data.mode === "media";
-    if (data.mode !== "media") $("scan-mode").value = data.mode || "deep";
-    $("login-description").textContent =
-      data.mode === "media"
-        ? "用当前档案账号扫码，只补全已有图片。"
-        : (loginIntent === "add"
-            ? "用新账号扫码，建立独立档案。"
-            : "请用 QQ " + (data.task_account || data.account) + " 扫码更新已有档案。") +
-          modeDescriptions[data.mode || "collect"];
-  } else if (data.phase !== "login" && $("qr-dialog").open) $("qr-dialog").close();
+  renderLogin(data);
   const years = data.years.join("|");
   if ($("years").dataset.values !== years) {
     $("years").dataset.values = years;
@@ -502,8 +501,11 @@ async function poll(interactive = true) {
     if (pageCache.size > 8) pageCache.delete(pageCache.keys().next().value);
     if (boot) boot = false;
   } catch (e) {
-    if (number === requestNumber && e.name !== "AbortError")
+    if (number === requestNumber && e.name !== "AbortError") {
       $("task-message").textContent = "连接暂不可用，正在重试…";
+      if (loginFlow?.step === "login")
+        loginError("暂时无法连接本地服务。正在重试，也可取消后重新扫码。");
+    }
   } finally {
     if (number === requestNumber) {
       polling = false;
@@ -513,40 +515,204 @@ async function poll(interactive = true) {
   }
 }
 // END state request coordinator
-let loginIntent = "update";
-async function startLogin(intent = "update") {
+// BEGIN login flow
+let loginIntent = "update",
+  loginFlow = null,
+  loginSequence = 0;
+function loginError(message) {
+  $("login-error").textContent = message;
+  $("login-error").hidden = !message;
+}
+function loginSettings() {
+  $("login-settings").hidden = false;
+  $("login-qr").hidden = true;
+  $("qr-start").disabled = false;
+  $("qr-start").textContent = "下一步 · 扫码";
+}
+async function startLogin(intent = "update", media = false) {
   if (current?.active) {
-    toast("已有任务正在运行，可切换档案浏览，或先暂停任务");
+    toast("已有任务正在运行，请先暂停并等待保存完成");
+    return;
+  }
+  if (media && !current?.account) {
+    toast("请先添加账号并备份内容");
+    return;
+  }
+  if (media && current?.stats && !(current.stats.photos_pending || current.stats.photos_failed)) {
+    toast("当前图片已全部保存到本地，无需扫码");
     return;
   }
   if (!current?.account) intent = "add";
   loginIntent = intent;
-  $("qr-title").textContent = intent === "add" ? "添加账号并备份" : "更新当前档案";
-  $("qr-dialog").showModal();
+  loginFlow = {
+    sequence: ++loginSequence,
+    step: "settings",
+    media,
+    intent,
+    account: current?.account,
+  };
+  $("qr-title").textContent = media
+    ? "补全已有图片"
+    : intent === "add"
+      ? "添加账号并备份"
+      : "更新当前档案";
+  $("login-description").textContent = media
+    ? "只尝试下载当前档案中尚未保存的图片，不搜索新增说说。请使用该档案的 QQ 扫码。"
+    : intent === "add"
+      ? "先选择本次设置，再使用手机 QQ 扫码建立独立档案。"
+      : "请使用 QQ " + current.account + " 扫码更新已有档案。先选择本次设置。";
+  $("mode-setting").hidden = media;
+  $("missing-photos").hidden = !media;
+  $("missing-photos").textContent =
+    `本地尚未保存 ${(current?.stats?.photos_pending || 0) + (current?.stats?.photos_failed || 0)} 张图片（不保证全部可取得）`;
+  $("login-budget").hidden = media;
+  $("scan-mode").disabled = false;
+  $("workers").disabled = false;
+  loginError("");
+  loginSettings();
+  if (!$("qr-dialog").open) $("qr-dialog").showModal();
+}
+async function beginQr() {
+  const flow = loginFlow;
+  if (!flow || flow.step !== "settings") return;
+  flow.step = "starting";
+  loginError("");
+  $("login-settings").hidden = true;
+  $("login-qr").hidden = false;
+  $("qr-image").removeAttribute("src");
   $("qr-image").style.display = "none";
   $("qr-loading").style.display = "block";
-  await api("start", { workers: Number($("workers").value), mode: $("scan-mode").value, intent });
+  $("qr-loading").textContent = "正在生成二维码…";
+  $("qr-message").textContent = "正在连接 QQ 登录服务";
+  $("qr-refresh").disabled = true;
+  $("qr-back").disabled = true;
+  let result;
+  try {
+    result = await api(flow.media ? "upgrade" : "start", {
+      workers: Number($("workers").value),
+      mode: $("scan-mode").value,
+      intent: flow.intent,
+    });
+  } catch (error) {
+    if (loginFlow !== flow) return;
+    flow.step = "settings";
+    loginSettings();
+    loginError("无法开始扫码：" + error.message + "。请重试。");
+    return;
+  }
+  if (loginFlow !== flow) {
+    if (result.task_id) await api("stop", { task_id: result.task_id });
+    return;
+  }
+  if (result.started === false) {
+    loginFlow = null;
+    $("qr-dialog").close();
+    toast("当前图片已全部保存到本地，无需扫码");
+    return;
+  }
+  flow.taskId = result.task_id;
+  flow.step = "login";
+  $("qr-back").disabled = false;
+  $("qr-refresh").disabled = false;
+  await poll();
+}
+function renderLogin(data) {
+  const flow = loginFlow;
+  // Older state requests, including cached pages, cannot dismiss a new dialog.
+  if (flow?.step === "settings" && flow.awaitingCancel && data.task_id === flow.cancelledTaskId) {
+    $("qr-start").disabled = data.active;
+    if (!data.active) {
+      flow.awaitingCancel = false;
+      loginError("");
+    }
+  }
+  if (!flow || flow.step !== "login" || !flow.taskId || data.task_id !== flow.taskId) return;
+  $("qr-message").textContent = data.message;
+  if (data.phase === "login") {
+    $("qr-loading").textContent =
+      data.qr_status === "expired" ? "二维码已过期，请刷新" : "正在生成二维码…";
+    $("qr-image").style.display = data.qr ? "block" : "none";
+    $("qr-loading").style.display = data.qr ? "none" : "block";
+    if (data.qr) $("qr-image").src = data.qr;
+    return;
+  }
+  if ((data.active && data.phase === "collecting") || data.phase === "done") {
+    loginFlow = null;
+    $("qr-dialog").close();
+  } else if (!data.active) {
+    flow.step = "settings";
+    loginSettings();
+    loginError(data.message || "扫码未完成，请重试");
+  }
+}
+async function closeLogin(back = false) {
+  const flow = loginFlow;
+  if (!flow) return;
+  if (flow.step === "starting") {
+    loginFlow = null;
+    $("qr-dialog").close();
+    return;
+  }
+  if (flow.taskId && flow.step === "login") {
+    $("qr-back").disabled = true;
+    try {
+      await api("stop", { task_id: flow.taskId });
+    } catch (error) {
+      loginError("取消扫码未确认：" + error.message);
+      $("qr-back").disabled = false;
+      return;
+    }
+  }
+  if (back) {
+    flow.step = "settings";
+    flow.cancelledTaskId = flow.taskId;
+    flow.taskId = null;
+    flow.awaitingCancel = true;
+    loginSettings();
+    $("qr-start").disabled = true;
+    loginError("已请求取消上次扫码。可修改设置；请等待取消完成后再次扫码。");
+  } else {
+    loginFlow = null;
+    $("qr-dialog").close();
+  }
   poll();
 }
 $("login").onclick = () => startLogin("update").catch((e) => toast(e.message));
-$("qr-close").onclick = () => {
-  if (current?.phase === "login") api("stop", {});
-  $("qr-dialog").close();
-};
-$("qr-dialog").addEventListener("cancel", () => {
-  if (current?.phase === "login") api("stop", {});
+$("qr-start").onclick = () => beginQr().catch((e) => loginError(e.message));
+$("qr-close").onclick = () => closeLogin().catch((e) => loginError(e.message));
+$("qr-dialog").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeLogin().catch((e) => loginError(e.message));
 });
+$("qr-back").onclick = () => closeLogin(true).catch((e) => loginError(e.message));
 $("qr-refresh").onclick = async () => {
+  const flow = loginFlow;
+  if (!flow?.taskId) return;
+  $("qr-refresh").disabled = true;
   try {
-    await api("qr/refresh", {});
+    await api("qr/refresh", { task_id: flow.taskId });
     $("qr-image").style.display = "none";
     $("qr-loading").style.display = "block";
-    toast("正在获取新二维码");
-    poll();
+    $("qr-message").textContent = "正在生成新二维码…";
+    await poll();
   } catch (e) {
-    toast(e.message);
+    loginError("刷新失败：" + e.message + "。请重试。");
+  } finally {
+    $("qr-refresh").disabled = false;
   }
 };
+$("download-speed").onchange = () => {
+  if ($("download-speed").value !== "custom") $("workers").value = $("download-speed").value;
+};
+$("workers").onchange = () => {
+  $("download-speed").value = ["2", "6", "10"].includes($("workers").value)
+    ? $("workers").value
+    : "custom";
+};
+$("upgrade").onclick = () => startLogin("update", true).catch((e) => toast(e.message));
+$("relogin").onclick = () =>
+  startLogin("update", current?.mode === "media").catch((e) => toast(e.message));
+// END login flow
 $("stop").onclick = async () => {
   try {
     await api("stop", {});
@@ -623,51 +789,6 @@ document.addEventListener("visibilitychange", () => {
   } else poll();
 });
 
-$("workers").onchange = () => {
-  if (current?.phase === "login")
-    api("start", { workers: Number($("workers").value) }).catch((e) => toast(e.message));
-};
-
-$("upgrade").onclick = async () => {
-  try {
-    await api("upgrade", {});
-    $("qr-title").textContent = "扫码补全图片";
-    poll();
-    $("qr-image").style.display = "none";
-    $("qr-loading").style.display = "block";
-    $("qr-dialog").showModal();
-    toast("请用当前档案账号扫码，仅补全图片");
-  } catch (e) {
-    toast(e.message);
-  }
-};
-
-$("scan-mode").onchange = () => {
-  if (current?.phase === "login")
-    api("start", {
-      workers: Number($("workers").value),
-      mode: $("scan-mode").value,
-      intent: loginIntent,
-    }).catch((e) => toast(e.message));
-};
-
-$("relogin").onclick = async () => {
-  try {
-    await api("relogin", {});
-    poll();
-    $("qr-image").style.display = "none";
-    $("qr-loading").style.display = "block";
-    $("qr-dialog").showModal();
-  } catch (e) {
-    toast(e.message);
-  }
-};
-
-const modeDescriptions = {
-  backup: "先备份当前说说，补充互动图片。",
-  collect: "先备份，再查找常规历史线索。",
-  deep: "先备份，再扩大历史扫描；已扫分段会从断点继续。",
-};
 function duration(seconds) {
   seconds = Math.max(0, Math.round(seconds));
   return seconds >= 3600
@@ -754,7 +875,7 @@ function renderTask(data) {
   else if (p.percent != null) bar.value = p.percent;
   else if (active) bar.removeAttribute("value");
   else bar.value = 0;
-  bar.hidden = !active && !data.task_account;
+  bar.hidden = data.phase === "login" || (!active && !data.task_account);
   let description = active
     ? p.total
       ? `${p.label}：${p.done}/${p.total} · ${p.percent}%`
@@ -774,7 +895,7 @@ function renderTask(data) {
       " · " +
       (data.mode === "deep" ? "文字扫描本轮上限90分钟，可断点继续" : "文字采集本轮上限10分钟") +
       "，图片收尾另计";
-  $("scan-estimate").textContent = description;
+  $("scan-estimate").textContent = data.phase === "login" ? data.message : description;
 }
 $("account-switch").onclick = async () => {
   try {
