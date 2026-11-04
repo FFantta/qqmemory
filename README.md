@@ -4,7 +4,7 @@
 
 [官网与下载](https://qqmemory.com/) · [问题反馈](https://github.com/FFantta/qqmemory/issues) · [MIT 许可证](LICENSE)
 
-当前源码为 **0.5.6 / Build 15**，桌面安装包正在构建验证；已发布安装包及校验值以[下载清单](downloads/release.json)为准。项目处于朋友测试阶段。提供 Apple 芯片 Mac、Intel Mac 和 Windows x64 安装包，以及有限额的云端体验。
+当前桌面发布版本为 **0.5.6 / Build 15**；下载与校验值见[发布清单](downloads/release.json)。云端体验独立部署，当前为 0.5.5；官网使用 Vue，离线导出仍是独立 HTML。项目处于朋友测试阶段。提供 Apple 芯片 Mac、Intel Mac 和 Windows x64 安装包，以及有限额的云端体验。
 
 ## 直接下载安装包
 
@@ -12,9 +12,9 @@
 
 | 你的电脑 | 安装包 |
 | --- | --- |
-| Apple 芯片 Mac（M 系列） | [下载 DMG](https://qqmemory.com/downloads/qqmemory-0.5.3-mac-arm64.dmg) |
-| Intel 芯片 Mac | [下载 DMG](https://qqmemory.com/downloads/qqmemory-0.5.3-mac-x86_64.dmg) |
-| Windows x64（Intel / AMD 64 位） | [下载 ZIP](https://qqmemory.com/downloads/qqmemory-0.5.3-windows-x64.zip) |
+| Apple 芯片 Mac（M 系列） | [下载 DMG](https://qqmemory.com/downloads/qqmemory-0.5.6-mac-arm64.dmg) |
+| Intel 芯片 Mac | [下载 DMG](https://qqmemory.com/downloads/qqmemory-0.5.6-mac-x86_64.dmg) |
+| Windows x64（Intel / AMD 64 位） | [下载 ZIP](https://qqmemory.com/downloads/qqmemory-0.5.6-windows-x64.zip) |
 
 [安装说明与 Agent 指引](INSTALL.md) · [机器可读下载清单](downloads/release.json) · [GitHub Releases](https://github.com/FFantta/qqmemory/releases)
 

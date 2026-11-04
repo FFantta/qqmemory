@@ -2,7 +2,7 @@
 
 桌面入口为 `run_mac.py`（macOS / Windows，pywebview），云端入口为 `run_cloud.py`（Flask / Gunicorn）。SQLite 保存本地档案，离线导出为独立 HTML。官网使用 Vue，与应用核心分别构建和发布。
 
-完整下载、安装、开发命令和限制请阅读仓库根目录的 [README](../README.md) 和 [安装说明](../INSTALL.md)。当前源码版本 0.5.6 / Build 15；已发布安装包以根目录 `downloads/release.json` 为准。
+完整下载、安装、开发命令和限制请阅读仓库根目录的 [README](../README.md) 和 [安装说明](../INSTALL.md)。当前桌面发布版本 0.5.6 / Build 15；安装包以根目录 `downloads/release.json` 为准。
 
 ## 核心目录
 
