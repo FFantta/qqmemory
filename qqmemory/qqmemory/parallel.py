@@ -55,12 +55,17 @@ class MediaPipeline:
                 self.completed[index] += 1
                 del self.futures[mid]
 
-    def enqueue(self, ids):
+    def enqueue(self, ids, *, block=True):
         for mid in ids:
+            if self.should_stop():
+                break
             self.compact()
             self.heartbeat()
             if mid not in self.seen and mid not in self.futures and len(self.seen) < self.limit:
-                if self.capacity:
+                if self.capacity and not block:
+                    if not self.capacity.acquire(blocking=False):
+                        break  # Unscheduled IDs stay pending in SQLite for the next batch/drain.
+                elif self.capacity:
                     while not self.capacity.acquire(timeout=0.25):
                         self.heartbeat()
                         if self.should_stop():

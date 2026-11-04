@@ -36,7 +36,7 @@
           </li>
           <li>
             每轮约 20 分钟文字扫描、30 分钟总采集，启用深度历史断点。不按 12 张或 300
-            张截断；先扫描文字和图片线索，再整理评论、点赞并下载图片，最后按体积打包。每任务原图临时容量约
+            张截断；边扫描边下载可用图片，可实时预览文字和已保存照片，最后按体积打包。高清检查可在之后单独发起，不保证取得原图。每任务图片临时容量约
             512 MiB，可用空间不足时可能更早停止，不保证找回全部历史或原图。
           </li>
           <li><!-- CLOUD_STORAGE_POLICY --></li>
@@ -75,6 +75,19 @@
         </div>
         <p id="earliest-date" hidden></p>
         <p id="progress"></p>
+        <section id="live-preview" hidden aria-label="实时恢复内容">
+          <h3>正在回来的回忆</h3>
+          <p id="preview-status" class="hint">
+            采集中的内容尚未完整；可用图片不代表原图，评论与点赞会陆续补齐。
+          </p>
+          <p id="preview-error" role="status"></p>
+          <div id="preview-cards"></div>
+          <div class="actions">
+            <button id="preview-prev" class="secondary">上一页</button
+            ><span id="preview-page"></span
+            ><button id="preview-next" class="secondary">下一页</button>
+          </div>
+        </section>
         <div id="results" hidden>
           <p id="stats"></p>
           <div class="actions">
@@ -92,6 +105,7 @@
             中的文件合并到第一包。继续任务会生成新的完整分包，不能只取最后一包。未取得的图片仍保留提示。
           </p>
         </div>
+        <button id="quality" class="secondary" hidden>检查并补全高清（需同一 QQ 重新扫码）</button>
         <button id="continue" class="secondary" hidden>同一 QQ 继续断点（需重新扫码）</button>
         <p class="hint">
           继续前建议先下载已有成果。<!-- CLOUD_CONTINUATION_POLICY -->；不够空间时请保留下载文件，或使用本地桌面版。

@@ -11,8 +11,8 @@ class Element {
   }
   addEventListener() {}
   removeAttribute() {}
-  replaceChildren() {
-    this.children = [];
+  replaceChildren(...children) {
+    this.children = children;
   }
   appendChild(e) {
     this.children.push(e);
@@ -100,3 +100,47 @@ assert.equal(elements.get("live-status").hidden, true);
 assert.equal(elements.get("zip-parts").children.length, 2);
 assert.equal(elements.get("html").hidden, true);
 console.log("云端实时数量、阶段进度、采集时限、打包与分包入口检查通过");
+
+context.liveData = {
+  total: 1,
+  offset: 0,
+  posts: [
+    {
+      id: "p",
+      author: "测试",
+      date: "2020",
+      time_basis: "published",
+      content: "<script>alert(1)</script>",
+      likes: 1,
+      comment_count: 0,
+      comments: [],
+      media: [{ id: "m", state: "pending", url: null, quality_verified: false }],
+    },
+  ],
+};
+vm.runInContext("renderLivePreview(liveData)", context);
+const cardNode = elements.get("preview-cards").children[0];
+assert.equal(cardNode.children[2].textContent, "<script>alert(1)</script>");
+const photoNode = cardNode.children[3].children[0];
+assert.equal(photoNode.children[0].hidden, true);
+context.liveData.posts[0].media[0] = {
+  id: "m",
+  state: "saved",
+  url: "/api/jobs/test/media/m?v=one",
+  quality_verified: false,
+};
+vm.runInContext("renderLivePreview(liveData)", context);
+assert.equal(elements.get("preview-cards").children[0], cardNode);
+assert.equal(photoNode.children[0].hidden, false);
+assert.match(photoNode.children[1].textContent, /高清待检查/);
+Object.defineProperty(photoNode.children[0], "src", {
+  set() {
+    assert.fail("unchanged images must not reload on every poll");
+  },
+  configurable: true,
+});
+vm.runInContext("renderLivePreview(liveData)", context);
+context.liveData.posts[0].media[0].quality_verified = true;
+vm.runInContext("renderLivePreview(liveData)", context);
+assert.match(photoNode.children[1].textContent, /清晰度已检查.*不保证原图/);
+console.log("云端正文安全展示、图片逐张出现、清晰度状态与轮询图片复用检查通过");

@@ -4,8 +4,8 @@ import json
 import os
 from pathlib import Path
 
-VERSION = "0.5.4"
-BUILD = "13"
+VERSION = "0.5.5"
+BUILD = "14"
 
 
 def release_info():

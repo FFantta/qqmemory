@@ -70,13 +70,20 @@ def image_size(data):
         return image.size
 
 
-def download(archive, media_id, transport=fetch):
+def download(archive, media_id, transport=fetch, *, quality="best"):
+    if quality not in ("first", "best"):
+        raise ValueError("invalid_media_quality")
     from .quality import attempts, fingerprint
 
     row = archive.db.execute("SELECT * FROM media WHERE id=?", (media_id,)).fetchone()
     if row is None:
         raise KeyError(media_id)
     urls = attempts(json.loads(row["candidates"]))
+    if quality == "first":
+        # Prefer the source URL over speculative high-resolution rewrites.
+        import re
+
+        urls.sort(key=lambda url: bool(re.search(r"/q(?=&|$|\?)", url)))
     key = fingerprint(json.loads(row["candidates"]))
     best = None
     best_area = 0
@@ -91,7 +98,7 @@ def download(archive, media_id, transport=fetch):
                     width, height = image_size(data)
                     best_area = width * height
                     cached = True
-                    if row["quality_checked"] == key:
+                    if quality == "first" or row["quality_checked"] == key:
                         return row["local_path"]
             except (OSError, ValueError):
                 pass
@@ -104,6 +111,8 @@ def download(archive, media_id, transport=fetch):
             if width * height > best_area:
                 best = (data, ext, width, height)
                 best_area = width * height
+            if quality == "first":
+                break
         except (OSError, ValueError, urllib.error.URLError) as exc:
             errors.append(type(exc).__name__)
     if best is not None:
@@ -123,7 +132,15 @@ def download(archive, media_id, transport=fetch):
             with archive.db:
                 archive.db.execute(
                     "UPDATE media SET state='saved',local_path=?,sha256=?,error=NULL,width=?,height=?,byte_size=?,quality_checked=? WHERE id=?",
-                    (relative, digest, width, height, len(data), key, media_id),
+                    (
+                        relative,
+                        digest,
+                        width,
+                        height,
+                        len(data),
+                        key if quality == "best" else None,
+                        media_id,
+                    ),
                 )
         finally:
             part.unlink(missing_ok=True)

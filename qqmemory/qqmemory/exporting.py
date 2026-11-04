@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from .timeline import timeline
 from .activities import CATEGORIES
 from .parsing import photo_candidates
+from .quality import fingerprint
 from .richtext import rich_html, person_html
 from pathlib import Path
 
@@ -54,6 +55,7 @@ def export_archive(archive, destination, progress=None, link_media=False, fetch_
         report = []
         copied = 0
         for index, m in enumerate(media, 1):
+            m["quality_verified"] = m["quality_checked"] == fingerprint(json.loads(m["candidates"]))
             m.pop("candidates")  # Signed source URLs are excluded from public exports.
             relative = m["local_path"]
             valid = False
@@ -114,7 +116,7 @@ def export_archive(archive, destination, progress=None, link_media=False, fetch_
             photos = []
             for m in media_by_post.get(post["id"], []):
                 photos.append(
-                    f'<a class="photo" href="{html.escape(m["local_path"], quote=True)}"><img alt="归档照片" loading="lazy" src="{html.escape(m["local_path"], quote=True)}"></a>'
+                    f'<a class="photo" href="{html.escape(m["local_path"], quote=True)}"><img alt="归档照片" loading="lazy" src="{html.escape(m["local_path"], quote=True)}"><small class="photo-quality">{"清晰度已检查 · 不保证原图" if m["quality_verified"] else "可用图片 · 高清待检查"}</small></a>'
                     if m["local_path"]
                     else '<span class="photo"><span>图片尚未保存</span></span>'
                 )

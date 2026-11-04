@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qqmemory"
-version = "0.5.4"
+version = "0.5.5"
 description = "Local QQ Zone archival core"
 requires-python = ">=3.11"
 license = {text = "MIT"}

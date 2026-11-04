@@ -64,6 +64,7 @@ class CloudJob:
         self.thread = None
         self.account = None
         self.rounds = 1
+        self.mode = "collect"
         self.bundle_dir = None
         self.parts = []
         self.inline_ready = False
@@ -88,6 +89,7 @@ class CloudJob:
             login_finished=self.login_finished,
             account=self.account,
             rounds=self.rounds,
+            mode=self.mode,
             parts=self.parts,
             inline_ready=self.inline_ready,
             budget_reason=self.budget_reason,
@@ -101,6 +103,31 @@ class CloudJob:
 
     def state(self):
         with self.lock:
+            # Worker threads save images independently of text scans. Poll SQLite so
+            # their completed downloads are visible even while a QQ request is slow.
+            if self.account and str(self.account).isdigit():
+                database = self.root / self.account / "archive.sqlite3"
+                if database.is_file():
+                    db = None
+                    try:
+                        db = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=1)
+                        media = db.execute(
+                            "SELECT count(*),sum(state='saved'),sum(state='failed'),sum(state='saved' AND quality_checked IS NULL) FROM media"
+                        ).fetchone()
+                        self.counts.update(
+                            photos_found=media[0],
+                            photos_saved=media[1] or 0,
+                            photos_failed=media[2] or 0,
+                            photos_quality_pending=media[3] or 0,
+                        )
+                        self.counts["posts"] = db.execute("SELECT count(*) FROM posts").fetchone()[
+                            0
+                        ]
+                    except sqlite3.OperationalError:
+                        pass  # The collector may still be creating its first tables.
+                    finally:
+                        if db is not None:
+                            db.close()
             phase = (
                 "stopping"
                 if self.active and self.stop.is_set() and self.phase in ("login", "collecting")
@@ -118,6 +145,9 @@ class CloudJob:
                 qr=self.qr,
                 expires=self.expires,
                 active=self.active,
+                can_live_preview=bool(
+                    self.account and (self.root / self.account / "archive.sqlite3").is_file()
+                ),
                 stats=self.stats,
                 counts=self.counts,
                 collection_elapsed=max(0, int(time.monotonic() - self.collection_started))
@@ -135,6 +165,7 @@ class CloudJob:
                 inline_ready=self.inline_ready,
                 can_continue=self.output is not None and not self.active and not self.budget_reason,
                 rounds=self.rounds,
+                mode=self.mode,
             )
 
     def resource_guard(self):
@@ -176,6 +207,7 @@ class CloudJob:
                         "photos_found",
                         "photos_saved",
                         "photos_failed",
+                        "photos_quality_pending",
                         "requests",
                         "details_pending",
                     )
@@ -229,7 +261,11 @@ class CloudJob:
                 self.login_finished = True
                 self.collection_started = time.monotonic()
                 self.phase, self.qr = "collecting", None
-                self.message = "正在分段扫描；图片分批下载，可暂停保存并继续断点"
+                self.message = (
+                    "正在检查并补全高清图片；不重新扫描文字"
+                    if self.mode == "quality"
+                    else "正在边扫描边保存图片，已取得的内容可实时预览"
+                )
             timer = threading.Timer(self.service.limits.total_seconds, self.stop.set)
             timer.daemon = True
             timer.start()
@@ -239,8 +275,10 @@ class CloudJob:
                 self.stop,
                 self.notify,
                 media_workers=2,
+                media_quality="best" if self.mode == "quality" else "first",
+                media_only=self.mode == "quality",
                 limits=self.service.limits,
-                deep=True,
+                deep=self.mode != "quality",
                 resource_guard=self.resource_guard,
                 media_max_pending=4,
                 link_export_media=True,
@@ -455,6 +493,7 @@ class CloudService:
                 job.active, job.deleted, job.stats = False, False, value.get("stats", {})
                 job.counts, job.collection_started = value.get("counts", {}), None
                 job.account, job.rounds = value.get("account"), value.get("rounds", 1)
+                job.mode = value.get("mode", "collect")
                 job.parts, job.inline_ready = (
                     value.get("parts", []),
                     value.get("inline_ready", False),
@@ -517,7 +556,7 @@ class CloudService:
             job.message = "正在刷新二维码，请重新扫码并确认登录"
             job.persist()
 
-    def continue_job(self, job):
+    def continue_job(self, job, *, quality_only=False):
         with self.lock, job.lock:
             if job.active or not job.output or job.deleted or job.budget_reason:
                 raise ValueError("当前任务不能继续；请先下载已有结果")
@@ -534,9 +573,18 @@ class CloudService:
             ):
                 self.slots.release()
                 raise ValueError("今日任务额度已用完")
+            job.mode = "quality" if quality_only else "collect"
             job.previous_output, job.output = job.output, None
             job.active, job.login_finished = True, False
-            job.phase, job.message, job.qr = "login", "请用同一个 QQ 扫码，继续本任务", None
+            job.phase, job.message, job.qr = (
+                "login",
+                (
+                    "请用同一个 QQ 扫码，仅检查并补全高清图片"
+                    if quality_only
+                    else "请用同一个 QQ 扫码，继续本任务"
+                ),
+                None,
+            )
             job.stop, job.refresh_qr, job.progress = (
                 threading.Event(),
                 threading.Event(),
@@ -760,6 +808,110 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     def status(identifier):
         return jsonify(owned(identifier).state())
 
+    def live_archive(job):
+        from types import SimpleNamespace
+
+        if not job.account or not str(job.account).isdigit():
+            abort(409)
+        root = job.root / job.account
+        database = root / "archive.sqlite3"
+        if not database.is_file():
+            abort(409)
+        db = sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=2)
+        db.row_factory = sqlite3.Row
+        return SimpleNamespace(root=root, db=db)
+
+    @app.get("/api/jobs/<identifier>/live")
+    def live(identifier):
+        from .timeline import timeline
+
+        job = owned(identifier)
+        try:
+            offset = max(0, min(1000000, int(request.args.get("offset", 0))))
+        except ValueError:
+            return jsonify(error="分页参数无效"), 400
+        archive = live_archive(job)
+        try:
+            with archive.db:
+                archive.db.execute("BEGIN")
+                ids = [
+                    row[0]
+                    for row in archive.db.execute(
+                        "SELECT id FROM posts ORDER BY created_at DESC,id LIMIT 20 OFFSET ?",
+                        (offset,),
+                    )
+                ]
+                total = archive.db.execute("SELECT count(*) FROM posts").fetchone()[0]
+                posts = timeline(archive, limit=20, post_ids=ids)["posts"]
+                result = []
+                for post in posts:
+                    result.append(
+                        dict(
+                            id=post["id"],
+                            content=post["content"][:12000],
+                            date=post["date"],
+                            time_basis=post["time_basis"],
+                            category=post["category"],
+                            author=str(post["author"].get("nickname") or "我的空间")[:200],
+                            likes=post["like_count"],
+                            comment_count=post["comment_count"],
+                            comments=[
+                                dict(
+                                    author=str(c.get("nickname") or c.get("uin") or "空间用户")[
+                                        :200
+                                    ],
+                                    content=str(c.get("content") or "")[:2000],
+                                    replies=[
+                                        dict(
+                                            author=str(
+                                                r.get("nickname") or r.get("uin") or "空间用户"
+                                            )[:200],
+                                            content=str(r.get("content") or "")[:2000],
+                                        )
+                                        for r in c.get("replies", [])[:10]
+                                    ],
+                                )
+                                for c in post["comments"][:20]
+                            ],
+                            media=[
+                                dict(
+                                    id=m["id"],
+                                    state=m["state"],
+                                    quality_verified=m["quality_verified"],
+                                    url=f"/api/jobs/{job.id}/media/{m['id']}?v={m['sha256']}"
+                                    if m["state"] == "saved"
+                                    else None,
+                                )
+                                for m in post["media"][:36]
+                            ],
+                        )
+                    )
+            return jsonify(posts=result, total=total, offset=offset, limit=20, active=job.active)
+        finally:
+            archive.db.close()
+
+    @app.get("/api/jobs/<identifier>/media/<media_id>")
+    def live_media(identifier, media_id):
+        job = owned(identifier)
+        archive = live_archive(job)
+        try:
+            row = archive.db.execute(
+                "SELECT local_path FROM media WHERE id=? AND state='saved'", (media_id,)
+            ).fetchone()
+            if not row or not row[0]:
+                abort(404)
+            path = (archive.root / row[0]).resolve()
+            if not path.is_relative_to((archive.root / "media").resolve()) or path.suffix not in (
+                ".jpg",
+                ".png",
+                ".gif",
+                ".webp",
+            ):
+                abort(404)
+            return private_file(job, path, unfinished=True)
+        finally:
+            archive.db.close()
+
     @app.post("/api/jobs/<identifier>/stop")
     def stop(identifier):
         job = owned(identifier)
@@ -779,7 +931,10 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     def continue_job(identifier):
         job = owned(identifier)
         try:
-            service.continue_job(job)
+            quality_only = (request.json or {}).get("quality_only", False)
+            if not isinstance(quality_only, bool):
+                return jsonify(error="高清检查参数无效"), 400
+            service.continue_job(job, quality_only=quality_only)
         except ValueError as exc:
             return jsonify(error=str(exc)), 409
         return jsonify(job.state())
@@ -789,8 +944,8 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
         service.delete(owned(identifier))
         return jsonify(ok=True, persistent_storage=persistent, **release_info())
 
-    def private_file(job, path, attachment=False, name=None):
-        if not job.output:
+    def private_file(job, path, attachment=False, name=None, unfinished=False):
+        if not job.output and not unfinished:
             abort(409)
         if not path.is_file():
             abort(404)
@@ -814,7 +969,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     @app.get("/jobs/<identifier>/preview/<path:filename>")
     def preview(identifier, filename):
         job = owned(identifier)
-        if not job.output:
+        if not job.output and not unfinished:
             abort(409)
         path = (job.output.parent / filename).resolve()
         if (

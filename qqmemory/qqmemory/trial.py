@@ -67,6 +67,7 @@ def run_trial(
     media_max_pending=None,
     link_export_media=False,
     text_first=False,
+    media_quality="best",
 ):
     with collection_lock(Path(root) / qq.uin):
         return _run_trial(
@@ -83,6 +84,7 @@ def run_trial(
             media_max_pending,
             link_export_media,
             text_first,
+            media_quality,
         )
 
 
@@ -100,6 +102,7 @@ def _run_trial(
     media_max_pending=None,
     link_export_media=False,
     text_first=False,
+    media_quality="best",
 ):
     limits = limits or (TrialLimits(5400, 6000, 3600, 3000) if deep else TrialLimits())
     account = Path(root) / qq.uin
@@ -200,7 +203,11 @@ def _run_trial(
                         # Let the downloader try the next candidate on network errors.
                         raise OSError("media_network_error") from exc
 
-                return download(local, mid, transport)
+                return (
+                    download(local, mid, transport, quality="first")
+                    if media_quality == "first"
+                    else download(local, mid, transport)
+                )
         finally:
             local.close()
 
@@ -211,7 +218,7 @@ def _run_trial(
 
     def publish_counts():
         media = archive.db.execute(
-            "SELECT count(*),sum(state='saved'),sum(state='failed') FROM media"
+            "SELECT count(*),sum(state='saved'),sum(state='failed'),sum(state='saved' AND quality_checked IS NULL) FROM media"
         ).fetchone()
         notify(
             "counts",
@@ -220,6 +227,7 @@ def _run_trial(
                 photos_found=media[0],
                 photos_saved=media[1] or 0,
                 photos_failed=media[2] or 0,
+                photos_quality_pending=media[3] or 0,
                 requests=requests_count,
                 **date_bounds,
             ),
@@ -245,15 +253,16 @@ def _run_trial(
         should_stop=stop.is_set,
     )
 
-    def enqueue_media():
-        if text_first and not saving_images:
+    def enqueue_media(drain=False):
+        if text_first and media_quality != "first" and not saving_images:
             return
         ids = [
             r["id"]
             for r in archive.db.execute("SELECT * FROM media ORDER BY rowid")
-            if photo_candidates(json.loads(r["candidates"])) and needs_quality_check(r)
+            if photo_candidates(json.loads(r["candidates"]))
+            and (r["state"] != "saved" if media_quality == "first" else needs_quality_check(r))
         ]
-        pipeline.enqueue(ids)
+        pipeline.enqueue(ids, block=drain or media_quality != "first")
 
     def request(url, params):
         nonlocal requests_count
@@ -541,6 +550,8 @@ def _run_trial(
             enqueue_media()
         notify("progress", dict(stage="media"))
         notify("status", "正在停止并收尾图片任务…" if stop.is_set() else "正在等待图片任务收尾…")
+        if media_quality == "first" and not stop.is_set():
+            enqueue_media(drain=True)
         saved, failed, interrupted = pipeline.finish(cancel=stop.is_set())
         media_elapsed = time.monotonic() - media_started
         if interrupted:
@@ -584,12 +595,13 @@ def _run_trial(
             - json.loads((destination / "manifest.json").read_text(encoding="utf-8"))[
                 "missing_media"
             ],
-            "text_first": text_first,
+            "text_first": text_first and media_quality != "first",
             "pending_social_records": remaining_details,
             "scan_elapsed_seconds": round(scan_elapsed, 2),
             "details_elapsed_seconds": round(details_elapsed, 2),
             "media_elapsed_seconds": round(media_elapsed, 2),
             "media_concurrency": media_workers,
+            "media_quality": media_quality,
             "media_saved_this_run": saved,
             "media_failed_this_run": failed,
             "note": "历史来源不等于已确认删除；可能是当前列表遗漏或接口范围差异。年份窗是有限探测，不是完整历史覆盖。",

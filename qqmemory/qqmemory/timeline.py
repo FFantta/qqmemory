@@ -25,9 +25,21 @@ def clean_content(value):
     return re.sub(r"^[：:]\s*", "", "\n".join(lines).strip(), count=1)
 
 
-def timeline(archive, search="", year="", limit=30, offset=0, photos_only=False, category=""):
+def timeline(
+    archive, search="", year="", limit=30, offset=0, photos_only=False, category="", post_ids=None
+):
+    from .quality import fingerprint
+
+    if post_ids is not None and not post_ids:
+        return {"posts": [], "total": 0, "years": [], "category_counts": {}}
+    args = tuple(post_ids or ())
+    marks = ",".join("?" for _ in args)
+    evidence_filter = f" WHERE post_id IN ({marks})" if post_ids is not None else ""
+    post_filter = f" WHERE id IN ({marks})" if post_ids is not None else ""
     sources = {}
-    for row in archive.db.execute("SELECT post_id,source,payload FROM evidence"):
+    for row in archive.db.execute(
+        "SELECT post_id,source,payload FROM evidence" + evidence_filter, args
+    ):
         record = json.loads(row["payload"])
         if (
             record.get("evidence_html")
@@ -38,17 +50,23 @@ def timeline(archive, search="", year="", limit=30, offset=0, photos_only=False,
         sources.setdefault(row["post_id"], []).append(record)
     media_by_post = {}
     for row in archive.db.execute(
-        "SELECT post_id,id,state,position,error,candidates,width,height,sha256 FROM media ORDER BY post_id,position"
+        "SELECT post_id,id,state,position,error,candidates,width,height,sha256,quality_checked FROM media"
+        + evidence_filter
+        + " ORDER BY post_id,position",
+        args,
     ):
         if photo_candidates(json.loads(row["candidates"])):
             item = dict(row)
+            item["quality_verified"] = item.pop("quality_checked") == fingerprint(
+                json.loads(item["candidates"])
+            )
             pid = item.pop("post_id")
             item.pop("candidates")
             media_by_post.setdefault(pid, []).append(item)
     result = []
     available_years = set()
     counts = dict.fromkeys(("posts", "interactions", "gifts", "blogs"), 0)
-    for row in archive.db.execute("SELECT * FROM posts"):
+    for row in archive.db.execute("SELECT * FROM posts" + post_filter, args):
         post = dict(row)
         post["content"] = clean_content(post["content"])
         post["content_tokens"] = tokens(post["content"])

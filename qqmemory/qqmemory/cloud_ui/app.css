@@ -248,3 +248,43 @@ input:focus-visible {
   margin: 4px 0 8px;
   overflow-wrap: anywhere;
 }
+
+#live-preview {
+  margin-top: 24px;
+}
+.live-card {
+  border-top: 1px solid #dedfd4;
+  padding: 18px 0;
+}
+.live-card h4 {
+  margin: 0;
+}
+.live-content,
+.live-comments {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.live-photos {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.live-photo {
+  min-width: 0;
+  background: #f3f3ed;
+}
+.live-photo img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+.live-photo small {
+  display: block;
+  padding: 5px;
+  font-size: 10px;
+}
+@media (max-width: 500px) {
+  .live-photos {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
