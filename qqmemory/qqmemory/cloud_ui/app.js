@@ -51,7 +51,17 @@ function render(job) {
     job.mode === "quality" && job.phase === "collecting"
       ? "正在检查并补全高清"
       : phases[job.phase] || "正在处理";
-  $("message").textContent = job.message;
+  // Internal scan counters and estimates are diagnostics, not recovery progress.
+  $("message").textContent =
+    job.phase === "collecting"
+      ? job.mode === "quality"
+        ? "正在检查图片清晰度，完成后会更新已保存的照片。"
+        : "正在找回回忆，已取得的内容会陆续显示。"
+      : job.phase === "stopping"
+        ? "正在保存已有内容…"
+        : job.phase === "exporting"
+          ? "正在生成下载文件…"
+          : job.message;
   $("expiry").textContent = "最晚保留至 " + new Date(job.expires * 1000).toLocaleTimeString();
   const hasQR = typeof job.qr === "string" && job.qr.startsWith("data:image/png;base64,");
   $("qr-area").hidden = !hasQR;
@@ -99,8 +109,7 @@ function render(job) {
       c.photos_found +
       " 张" +
       (c.photos_quality_pending ? " · " + c.photos_quality_pending + " 张高清待检查" : "") +
-      (c.photos_failed ? " · 失败 " + c.photos_failed + " 张" : "") +
-      (c.details_pending ? " · " + c.details_pending + " 条线索的互动待整理" : "")
+      (c.photos_failed ? " · 失败 " + c.photos_failed + " 张" : "")
     : "正在请求第一批内容，取得后会显示数量…";
   const formatDate = (value) =>
     new Intl.DateTimeFormat("zh-CN", {
@@ -120,29 +129,10 @@ function render(job) {
   if (c.earliest_interaction != null)
     $("earliest-date").textContent +=
       " · ≈ 最早已知互动：" + formatDate(c.earliest_interaction) + "（北京时间，不代表发帖时间）";
-  let timing = "已用 " + duration(p.elapsed);
-  if (job.collection_elapsed != null) {
-    const left = Math.max(0, job.collection_limit - job.collection_elapsed);
-    timing +=
-      job.phase === "exporting"
-        ? " · 正在打包，完成后出现下载入口"
-        : left
-          ? " · 本轮采集时限剩余 " + duration(left) + "，之后还需生成文件"
-          : " · 已到本轮采集时限，正在收尾并生成文件";
-  }
-  if (Array.isArray(p.eta) && p.eta.length === 2)
-    timing += " · 当前阶段粗估还需 " + duration(p.eta[0]) + "—" + duration(p.eta[1]);
-  $("live-time").textContent = timing;
-  const measured = p.total > 0 && p.percent != null;
-  $("stage-meter").hidden = !collecting || !measured || job.phase === "stopping";
-  if (measured) $("stage-meter").value = p.percent;
-  $("progress").textContent =
-    (p.label || p.stage || "") +
-    (measured ? " · " + p.done + " / " + p.total + "（" + p.percent + "%）" : "") +
-    (p.stage === "deep" ? " · 扫描计划进度，非恢复比例" : "");
-  if (job.phase === "stopping")
-    $("progress").textContent =
-      "停止新采集 → 收尾当前网络请求 → 生成已有结果；此过程仍需一点时间。";
+  $("live-time").textContent =
+    "已用 " +
+    duration(p.elapsed) +
+    (job.phase === "exporting" ? " · 正在打包，完成后出现下载入口" : "");
   if (job.ready) {
     const base = "/jobs/" + encodeURIComponent(job.id);
     $("preview").href = base + "/preview/index.html";

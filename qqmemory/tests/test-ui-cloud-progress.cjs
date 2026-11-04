@@ -38,7 +38,7 @@ const job = {
   id: "test",
   active: true,
   phase: "collecting",
-  message: "collecting",
+  message: "深度找回：分段 25/1012，第 1 页；正在请求历史数据",
   expires: 0,
   counts: {
     posts: 68,
@@ -64,22 +64,33 @@ context.job = job;
 vm.runInContext("render(job)", context);
 assert.equal(elements.get("live-status").hidden, false);
 assert.match(elements.get("live-counts").textContent, /68 条记录.*120.*350.*失败 2/);
-assert.match(elements.get("live-time").textContent, /20 分 0 秒/);
-assert.match(elements.get("live-time").textContent, /当前阶段粗估/);
-assert.match(elements.get("progress").textContent, /10 \/ 100.*非恢复比例/);
-assert.equal(elements.get("stage-meter").value, 10);
+assert.equal(elements.get("live-time").textContent, "已用 10 分 30 秒");
+assert.match(elements.get("message").textContent, /正在找回回忆/);
+assert.doesNotMatch(
+  [...elements.values()].map((e) => e.textContent).join(" "),
+  /分段|1012|粗估|时限剩余|非恢复比例/,
+);
+assert.equal(elements.has("stage-meter"), false);
+assert.equal(elements.has("progress"), false);
+assert.doesNotMatch(
+  fs.readFileSync("qqmemory/qqmemory/cloud_ui/index.html", "utf8"),
+  /继续前建议|CLOUD_CONTINUATION_POLICY/,
+);
+context.job = { ...job, mode: "quality" };
+vm.runInContext("render(job)", context);
+assert.match(elements.get("message").textContent, /检查图片清晰度/);
 assert.match(elements.get("earliest-date").textContent, /2020.*01.*01.*08:00/);
 assert.match(elements.get("earliest-date").textContent, /最早已知互动.*不代表发帖时间/);
 context.job = { ...job, phase: "stopping" };
 vm.runInContext("render(job)", context);
 assert.equal(elements.get("stop").disabled, true);
 assert.match(elements.get("phase").textContent, /暂停/);
-assert.match(elements.get("progress").textContent, /停止新采集/);
+assert.match(elements.get("message").textContent, /正在保存已有内容/);
 context.job = job;
 job.progress = { stage: "visible", elapsed: 1 };
 job.counts = {};
 vm.runInContext("render(job)", context);
-assert.equal(elements.get("stage-meter").hidden, true);
+assert.match(elements.get("message").textContent, /正在找回回忆/);
 assert.match(elements.get("live-counts").textContent, /第一批/);
 assert.match(elements.get("earliest-date").textContent, /暂未取得/);
 job.phase = "exporting";
@@ -99,7 +110,7 @@ vm.runInContext("render(job)", context);
 assert.equal(elements.get("live-status").hidden, true);
 assert.equal(elements.get("zip-parts").children.length, 2);
 assert.equal(elements.get("html").hidden, true);
-console.log("云端实时数量、阶段进度、采集时限、打包与分包入口检查通过");
+console.log("云端简明状态、隐藏内部进度和预估、打包与分包入口检查通过");
 
 context.liveData = {
   total: 1,
