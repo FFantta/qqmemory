@@ -18,7 +18,9 @@
         display: grid;
         place-items: center;
       }
-      .offline-photos:before { content: none; }
+      .offline-photos:before {
+        content: none;
+      }
       .offline-nav summary {
         display: none;
       }
@@ -95,7 +97,9 @@
       </div>
       <div class="profile">
         <!-- ACCOUNT_AVATAR -->
-        <div><strong><!-- ACCOUNT_NAME --></strong><span>已导出的本地快照</span></div>
+        <div>
+          <strong><!-- ACCOUNT_NAME --></strong><span>已导出的本地快照</span>
+        </div>
       </div>
       <details class="offline-nav" id="offline-nav" open>
         <summary>分类与年份</summary>
@@ -117,7 +121,9 @@
             我的日志 <span class="nav-count"></span>
           </button>
         </nav>
-        <label class="nav offline-photos"><input id="photos-only" type="checkbox" /> 只看有图记录</label>
+        <label class="nav offline-photos"
+          ><input id="photos-only" type="checkbox" /> 只看有图记录</label
+        >
         <div class="nav-label years-label">年份 <span>INDEX</span></div>
         <div id="years"></div>
       </details>
