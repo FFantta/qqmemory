@@ -546,7 +546,12 @@ def _run_trial(
         media_started = time.monotonic()
         saving_images = True
         if text_first and not stop.is_set():
-            notify("status", "文字扫描已结束，现在开始下载已发现的图片")
+            notify(
+                "status",
+                "文字扫描已结束，继续保存剩余图片"
+                if media_quality == "first"
+                else "文字扫描已结束，现在开始下载已发现的图片",
+            )
             enqueue_media()
         notify("progress", dict(stage="media"))
         notify("status", "正在停止并收尾图片任务…" if stop.is_set() else "正在等待图片任务收尾…")

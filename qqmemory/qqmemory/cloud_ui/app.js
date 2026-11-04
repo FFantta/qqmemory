@@ -296,7 +296,7 @@ async function refreshPreview() {
     renderLivePreview(data);
     $("preview-error").textContent = "";
   } catch (error) {
-    if (current?.id === id)
+    if (current?.id === id && sequence === previewSequence && previewOffset === offset)
       $("preview-error").textContent = "预览暂未更新：" + error.message + "；采集继续进行。";
   }
 }
@@ -364,10 +364,6 @@ $("stop").addEventListener("click", async () => {
     $("error").textContent = "";
   } catch (error) {
     pausePending = null;
-    let previewOffset = 0,
-      previewTask = null,
-      previewSequence = 0;
-    const previewCards = new Map();
     if (current) render(current);
     $("error").textContent = "暂停请求未确认：" + error.message + "。请重试暂停。";
   }
