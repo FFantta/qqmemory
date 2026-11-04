@@ -23,3 +23,18 @@ assert.equal(
   false,
 );
 console.log("离线分类、年份、正文与评论搜索和有图筛选检查通过");
+
+const records = [
+  card,
+  { textContent: "gift", dataset: { category: "gifts", year: "2018", photos: "false" } },
+  { textContent: "gift photo", dataset: { category: "gifts", year: "2022", photos: "true" } },
+  { ...card, dataset: { ...card.dataset, year: "2021" } },
+];
+const years = (...args) => Array.from(context.availableOfflineYears(...args));
+assert.deepEqual(years(records, "", "posts", false), ["2021", "2020"]);
+assert.deepEqual(years(records, "", "gifts", false), ["2022", "2018"]);
+assert.deepEqual(years(records, "", "gifts", true), ["2022"]);
+assert.deepEqual(years(records, "missing", "gifts", false), []);
+assert.equal(context.validOfflineYear("2020", years(records, "", "gifts", false)), "");
+assert.equal(context.validOfflineYear("2022", years(records, "", "gifts", false)), "2022");
+console.log("分类切换、搜索和有图筛选联动年份及无效年份重置检查通过");

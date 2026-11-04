@@ -18,6 +18,7 @@
         display: grid;
         place-items: center;
       }
+      .offline-photos:before { content: none; }
       .offline-nav summary {
         display: none;
       }
@@ -93,8 +94,8 @@
         <div><b>空间记忆</b><small>PERSONAL ARCHIVE</small></div>
       </div>
       <div class="profile">
-        <span class="avatar offline-avatar" aria-hidden="true">忆</span>
-        <div><strong>离线档案</strong><span>已导出的本地快照</span></div>
+        <!-- ACCOUNT_AVATAR -->
+        <div><strong><!-- ACCOUNT_NAME --></strong><span>已导出的本地快照</span></div>
       </div>
       <details class="offline-nav" id="offline-nav" open>
         <summary>分类与年份</summary>
@@ -116,7 +117,7 @@
             我的日志 <span class="nav-count"></span>
           </button>
         </nav>
-        <label class="nav"><input id="photos-only" type="checkbox" /> 只看有图记录</label>
+        <label class="nav offline-photos"><input id="photos-only" type="checkbox" /> 只看有图记录</label>
         <div class="nav-label years-label">年份 <span>INDEX</span></div>
         <div id="years"></div>
       </details>
@@ -134,16 +135,8 @@
             placeholder="搜索正文与评论…"
             aria-label="搜索正文与评论"
           />
-          <select id="category" aria-label="回忆分类">
-            <option value="">全部回忆</option>
-            <option value="posts">我的说说</option>
-            <option value="interactions">与他人互动</option>
-            <option value="gifts">礼物与游戏</option>
-            <option value="blogs">我的日志</option>
-          </select>
-          <select id="year-filter" aria-label="筛选年份">
-            <option value="">全部年份</option>
-          </select>
+          <input id="category" type="hidden" value="" />
+          <input id="year-filter" type="hidden" value="" />
         </div>
       </header>
       <main>

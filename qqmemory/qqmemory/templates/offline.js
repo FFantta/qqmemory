@@ -7,9 +7,43 @@ function matchesOffline(card, query, category, year, photosOnly) {
     (!photosOnly || card.dataset.photos === "true")
   );
 }
+function availableOfflineYears(records, query, category, photosOnly) {
+  return [
+    ...new Set(
+      records
+        .filter((card) => matchesOffline(card, query, category, "", photosOnly))
+        .map((card) => card.dataset.year),
+    ),
+  ]
+    .sort()
+    .reverse();
+}
+function validOfflineYear(year, years) {
+  return years.includes(year) ? year : "";
+}
 const get = (id) => document.getElementById(id);
 const cards = [...document.querySelectorAll("article.card")];
 function filterOffline() {
+  const years = availableOfflineYears(
+    cards,
+    get("search").value,
+    get("category").value,
+    get("photos-only").checked,
+  );
+  get("year-filter").value = validOfflineYear(get("year-filter").value, years);
+  get("years").replaceChildren(
+    ...years.map((year) => {
+      const button = document.createElement("button");
+      button.className = "year";
+      button.dataset.year = year;
+      button.textContent = year === "未知" ? "时间待确认" : year + " 年";
+      button.addEventListener("click", () => {
+        get("year-filter").value = get("year-filter").value === year ? "" : year;
+        filterOffline();
+      });
+      return button;
+    }),
+  );
   let shown = 0;
   for (const card of cards) {
     card.hidden = !matchesOffline(
@@ -38,21 +72,6 @@ for (const button of document.querySelectorAll("#offline-categories button")) {
     get("category").value = button.dataset.category;
     filterOffline();
   });
-}
-for (const year of [...new Set(cards.map((card) => card.dataset.year))].sort().reverse()) {
-  const option = document.createElement("option");
-  option.value = year;
-  option.textContent = year === "未知" ? "时间待确认" : year + " 年";
-  get("year-filter").append(option);
-  const button = document.createElement("button");
-  button.className = "year";
-  button.dataset.year = year;
-  button.textContent = option.textContent;
-  button.addEventListener("click", () => {
-    get("year-filter").value = get("year-filter").value === year ? "" : year;
-    filterOffline();
-  });
-  get("years").append(button);
 }
 if (window.matchMedia?.("(max-width: 780px)").matches) get("offline-nav").open = false;
 let photos = [],

@@ -224,6 +224,29 @@ def export_archive(archive, destination, progress=None, link_media=False, fetch_
         document = document.replace(
             "/* OFFLINE_SCRIPT */", template.with_suffix(".js").read_text(encoding="utf-8")
         )
+        account_name = "我的空间"
+        profile_path = archive.root / "profile.json"
+        if profile_path.is_file():
+            try:
+                account_name = (
+                    json.loads(profile_path.read_text(encoding="utf-8")).get("nickname")
+                    or account_name
+                )
+            except (ValueError, OSError, AttributeError):
+                pass
+        account_avatar = '<span class="avatar offline-avatar" aria-hidden="true">忆</span>'
+        account_uin = archive.root.name
+        if account_uin.isdigit():
+            avatar_source = archive.root.parent / "avatars" / (account_uin + ".img")
+            if avatar_source.is_file():
+                relative = asset_prefix + "/avatars/" + account_uin + ".jpg"
+                target = stage / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if not target.exists():
+                    shutil.copyfile(avatar_source, target)
+                account_avatar = '<img class="avatar" alt="账号头像" src="' + relative + '">'
+        document = document.replace("<!-- ACCOUNT_AVATAR -->", account_avatar)
+        document = document.replace("<!-- ACCOUNT_NAME -->", html.escape(str(account_name)))
         # Insert user content last; template-like text in a post stays literal.
         document = document.replace("<!-- ARCHIVE_CARDS -->", "".join(cards))
         (stage / "index.html").write_text(document, encoding="utf-8")

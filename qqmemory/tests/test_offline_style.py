@@ -13,6 +13,11 @@ class OfflineStyleTests(unittest.TestCase):
             root = Path(temp)
             archive = Archive(root / "123")
             try:
+                (archive.root / "profile.json").write_text(
+                    '{"nickname": "测试账号 <本人>"}', encoding="utf-8"
+                )
+                (root / "avatars").mkdir()
+                (root / "avatars/123.img").write_bytes(b"synthetic-avatar")
                 archive.ingest(
                     [
                         dict(
@@ -43,7 +48,12 @@ class OfflineStyleTests(unittest.TestCase):
                 card = page.select_one("article.card")
                 self.assertEqual(card["data-year"], "2020")
                 self.assertEqual(card["data-photos"], "false")
-                self.assertIsNotNone(page.select_one("#year-filter"))
+                self.assertEqual(page.select_one(".profile strong").get_text(), "测试账号 <本人>")
+                avatar = page.select_one(".profile img")
+                self.assertEqual((output.parent / avatar["src"]).read_bytes(), b"synthetic-avatar")
+                self.assertFalse(page.select("header select"))
+                self.assertEqual(page.select_one("#year-filter")["type"], "hidden")
+                self.assertEqual(len(page.select(".offline-photos input[type=checkbox]")), 1)
                 self.assertIsNotNone(page.select_one("#lightbox"))
                 self.assertFalse(page.select("#login, #upgrade, #qr-dialog"))
                 standalone_html(output, root / "standalone.html")
