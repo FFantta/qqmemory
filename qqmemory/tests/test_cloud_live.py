@@ -3,6 +3,7 @@ import json
 import tempfile
 import threading
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
@@ -22,9 +23,10 @@ def picture(size=(4, 4)):
 
 class FirstImageTests(unittest.TestCase):
     def test_first_success_is_saved_without_checking_other_versions_then_can_upgrade(self):
-        with tempfile.TemporaryDirectory() as directory:
-            archive = Archive(Path(directory) / "123")
-            self.addCleanup(archive.close)
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            closing(Archive(Path(directory) / "123")) as archive,
+        ):
             archive.ingest(
                 [
                     dict(
@@ -59,7 +61,10 @@ class FirstImageTests(unittest.TestCase):
                 first,
             )
             export_archive(archive, Path(directory) / "first-export")
-            self.assertIn("高清待检查", (Path(directory) / "first-export/index.html").read_text())
+            self.assertIn(
+                "高清待检查",
+                (Path(directory) / "first-export/index.html").read_text(encoding="utf-8"),
+            )
             upgraded = download(archive, mid, fetch)
             row = archive.db.execute("SELECT * FROM media").fetchone()
             self.assertEqual(row["width"], 12)
@@ -69,13 +74,11 @@ class FirstImageTests(unittest.TestCase):
             export_archive(archive, Path(directory) / "checked-export")
             self.assertIn(
                 "清晰度已检查 · 不保证原图",
-                (Path(directory) / "checked-export/index.html").read_text(),
+                (Path(directory) / "checked-export/index.html").read_text(encoding="utf-8"),
             )
 
     def test_failed_candidate_falls_back_but_does_not_claim_hd(self):
-        with tempfile.TemporaryDirectory() as directory:
-            archive = Archive(directory)
-            self.addCleanup(archive.close)
+        with tempfile.TemporaryDirectory() as directory, closing(Archive(directory)) as archive:
             archive.ingest(
                 [
                     dict(
@@ -282,7 +285,7 @@ class LivePreviewTests(unittest.TestCase):
         self.assertTrue(captured[0]["media_only"])
         self.assertEqual(captured[0]["media_quality"], "best")
         self.assertFalse(captured[0]["deep"])
-        persisted = json.loads((self.job.root / "job.json").read_text())
+        persisted = json.loads((self.job.root / "job.json").read_text(encoding="utf-8"))
         self.assertEqual(persisted["mode"], "quality")
         response = self.client.post(
             self.base + "/continue", json={"quality_only": "yes"}, headers=self.headers
