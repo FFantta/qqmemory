@@ -744,7 +744,7 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
 
     @app.get("/assets/<name>")
     def asset(name):
-        if name not in ("app.js", "app.css", "support-alipay.jpg"):
+        if name not in ("app.js", "app.css"):
             abort(404)
         return send_file(assets / name)
 
