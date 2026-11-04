@@ -121,7 +121,8 @@ class CloudTests(unittest.TestCase):
         page = self.client.get("/").get_data(as_text=True)
         self.assertNotIn("<!-- CLOUD_", page)
         self.assertIn("免费服务闲置后会休眠", page)
-        self.assertIn("Free 重启会清空任务及断点", page)
+        self.assertNotIn("继续前建议先下载已有成果", page)
+        self.assertNotIn('id="stage-meter"', page)
 
     def test_legacy_cookie_preserves_browser_owner(self):
         serializer = self.app.session_interface.get_signing_serializer(self.app)
