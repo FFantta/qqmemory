@@ -39,7 +39,6 @@
             张截断；边扫描边下载可用图片，可实时预览文字和已保存照片，最后按体积打包。高清检查可在之后单独发起，不保证取得原图。每任务图片临时容量约
             512 MiB，可用空间不足时可能更早停止，不保证找回全部历史或原图。
           </li>
-          <li><!-- CLOUD_STORAGE_POLICY --></li>
         </ul>
         <label class="consent"
           ><input
@@ -111,6 +110,31 @@
         </div>
       </section>
     </main>
+    <section class="support-entry">
+      <button id="support-open" class="secondary" aria-haspopup="dialog">支持一下</button>
+      <p class="hint">如果空间记忆帮到了你，可以请作者吃点好的。</p>
+    </section>
+    <dialog id="support-dialog" aria-labelledby="support-title">
+      <button id="support-close" class="text-button support-close" aria-label="关闭支持窗口">
+        关闭
+      </button>
+      <p class="eyebrow">谢谢你的心意</p>
+      <h2 id="support-title">给回忆加点能量</h2>
+      <p>喝杯咖啡 · 加个鸡腿 · 请顿外卖</p>
+      <div class="support-code">
+        <img
+          src="/assets/support-alipay.jpg"
+          alt="作者的支付宝收款码，打开支付宝扫一扫支持"
+          width="1280"
+          height="1596"
+        />
+      </div>
+      <a class="support-save" href="/assets/support-alipay.jpg" download="空间记忆-支付宝收款码.jpg"
+        >保存收款码</a
+      >
+      <p class="hint">打开支付宝扫一扫，或保存图片后从相册识别。</p>
+      <p class="hint">自愿支持，金额随心。是否支持都不影响使用和找回结果。</p>
+    </dialog>
     <footer>历史重建不等于确认原帖被删除。独立工具，非腾讯官方产品。</footer>
     <script src="/assets/app.js"></script>
   </body>

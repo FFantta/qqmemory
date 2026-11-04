@@ -39,6 +39,7 @@ qqmemory = [
     "cloud_ui/*.html",
     "cloud_ui/*.css",
     "cloud_ui/*.js",
+    "cloud_ui/*.jpg",
     "templates/*.html",
     "templates/*.js",
 ]

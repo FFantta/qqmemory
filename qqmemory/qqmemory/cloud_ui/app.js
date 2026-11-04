@@ -384,3 +384,18 @@ $("delete").addEventListener("click", async () => {
     $("error").textContent = error.message;
   }
 })();
+
+// Native dialog keeps keyboard focus inside and supports Escape to close.
+$("support-open").addEventListener("click", () => $("support-dialog").showModal());
+$("support-close").addEventListener("click", () => $("support-dialog").close());
+$("support-dialog").addEventListener("click", (event) => {
+  if (event.target !== $("support-dialog")) return;
+  const bounds = event.target.getBoundingClientRect();
+  if (
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom
+  )
+    event.target.close();
+});

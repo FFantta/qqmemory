@@ -288,3 +288,46 @@ input:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.support-entry {
+  width: min(700px, calc(100% - 40px));
+  margin: 0 auto 32px;
+  text-align: center;
+}
+#support-dialog {
+  width: min(400px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: 28px;
+  border: 1px solid #dde3d5;
+  border-radius: 16px;
+  background: #fafbf8;
+  color: #2b3029;
+  text-align: center;
+}
+#support-dialog::backdrop {
+  background: rgb(25 34 23 / 35%);
+  backdrop-filter: blur(4px);
+}
+.support-close {
+  float: right;
+}
+.support-code {
+  width: 270px;
+  max-width: 100%;
+  margin: 22px auto;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  color: #748168;
+}
+.support-code img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.support-save {
+  color: #607650;
+  text-decoration: underline;
+}

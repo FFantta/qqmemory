@@ -102,7 +102,7 @@ class CloudTests(unittest.TestCase):
             self.assertEqual(app.extensions["cloud_service"].disk_reserve, 64 * 1024**2)
             self.assertEqual(client.get("/api/session").json["limits"]["retention_seconds"], 3600)
             page = client.get("/").get_data(as_text=True)
-            self.assertIn("最多 7 天", page)
+            self.assertNotIn("托管商自动磁盘快照", page)
             self.assertNotIn("Free 重启", page)
             self.assertNotIn("<!-- CLOUD_", page)
             self.assertNotIn("免费服务闲置", page)
@@ -120,7 +120,7 @@ class CloudTests(unittest.TestCase):
     def test_formatted_root_resolves_storage_policy_markers(self):
         page = self.client.get("/").get_data(as_text=True)
         self.assertNotIn("<!-- CLOUD_", page)
-        self.assertIn("免费服务闲置后会休眠", page)
+        self.assertNotIn("服务不会因闲置自动休眠", page)
         self.assertNotIn("继续前建议先下载已有成果", page)
         self.assertNotIn('id="stage-meter"', page)
 

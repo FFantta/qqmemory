@@ -739,24 +739,12 @@ def create_cloud_app(root=None, secret=None, *, service=None, testing=False, cle
     @app.get("/")
     def index():
         page = (assets / "index.html").read_text(encoding="utf-8")
-        storage_policy = (
-            "服务不会因闲置自动休眠。归档与断点保存在持久磁盘，重启后仍可在保留期内访问；正在运行的 QQ 登录与采集会中断，需要重新扫码继续。1 GB 磁盘由所有任务共享，空间不足时会提前停止。托管商自动磁盘快照可能保留最多 7 天；删除按钮清除当前服务中的数据，不代表立即清除这些快照。"
-            if persistent
-            else "服务重启会中断正在运行的扫码与采集，请重新开始。免费服务闲置后会休眠，重新打开可能需等待约一分钟；休眠或重启会清空结果，请生成后立即下载。"
-        )
-        continuation_policy = (
-            "归档和断点在保留期内跨重启保存；重启后需用同一浏览器、同一 QQ 重新扫码继续"
-            if persistent
-            else "Free 重启会清空任务及断点，无法保证跨重启续传"
-        )
         page = page.replace("<!-- APP_VERSION -->", html.escape(VERSION))
-        page = page.replace("<!-- CLOUD_STORAGE_POLICY -->", html.escape(storage_policy))
-        page = page.replace("<!-- CLOUD_CONTINUATION_POLICY -->", html.escape(continuation_policy))
         return app.response_class(page, mimetype="text/html")
 
     @app.get("/assets/<name>")
     def asset(name):
-        if name not in ("app.js", "app.css"):
+        if name not in ("app.js", "app.css", "support-alipay.jpg"):
             abort(404)
         return send_file(assets / name)
 
