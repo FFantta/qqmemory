@@ -25,6 +25,7 @@ def files():
         ROOT / path
         for path in (
             "README.md",
+            "qqmemory/README.md",
             "INSTALL.md",
             "downloads/release.json",
             "scripts/publish-github-release.py",
