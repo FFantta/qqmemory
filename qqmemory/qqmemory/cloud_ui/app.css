@@ -310,7 +310,8 @@ input:focus-visible {
   backdrop-filter: blur(4px);
 }
 .support-close {
-  float: right;
+  display: block;
+  margin: 18px auto 0;
 }
 .support-code {
   width: 270px;
